@@ -1,5 +1,5 @@
 This is basically a rewrite of the `simple_test` program included in the
-[SOEM](OpenEtherCATSociety/SOEM) project.
+[SOEM](https://github.com/OpenEtherCATSociety/SOEM) project.
 
 Major differences from `simple_test`:
 * this is a self contained project, meant to showcase how to include
