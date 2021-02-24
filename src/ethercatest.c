@@ -263,7 +263,7 @@ io_dump(IO *io)
     for (n = 0; n < grp->Ibytes; ++n) {
         info(" %02X", grp->inputs[n]);
     }
-    info("\n");
+    info("  T: %" G_GINT64_FORMAT "\r", io->DCtime);
     return TRUE;
 }
 
@@ -393,7 +393,7 @@ main(int argc, char *argv[])
             }
             g_usleep(5000);
         }
-        info("Roundtrip time (usec): min %" G_GINT64_FORMAT
+        info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
              "  max %" G_GINT64_FORMAT "\n", min, max);
         io_stop(&io);
     }
