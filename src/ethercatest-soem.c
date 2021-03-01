@@ -33,7 +33,7 @@
 
 typedef struct {
     ecx_contextt    context;
-    gchar *         interface;
+    gchar *         iface;
     uint8           group;
     gint64          roundtrip_time;
 
@@ -62,33 +62,33 @@ typedef struct {
 static gchar *
 get_valid_interface(void)
 {
-    gchar *interface;
-    struct ifaddrs *ifaces;
+    gchar *iface;
+    struct ifaddrs *addrs;
 
-    interface = NULL;
-    if (getifaddrs(&ifaces) != 0) {
+    iface = NULL;
+    if (getifaddrs(&addrs) != 0) {
         info("getifaddrs() failed\n");
-    } else if (ifaces == NULL) {
+    } else if (addrs == NULL) {
         info("No interfaces found\n");
     } else {
-        struct ifaddrs *iface;
+        struct ifaddrs *addr;
         /* Find the first valid interface */
-        for (iface = ifaces; iface != NULL; iface = iface->ifa_next) {
-            if ((iface->ifa_flags & MUST_BE_ON) == MUST_BE_ON &&
-                (iface->ifa_flags & MUST_BE_OFF) == 0) {
+        for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
+            if ((addr->ifa_flags & MUST_BE_ON) == MUST_BE_ON &&
+                (addr->ifa_flags & MUST_BE_OFF) == 0) {
                 /* A valid interface has been found */
                 break;
             }
         }
-        if (iface == NULL) {
+        if (addr == NULL) {
             info("No valid interfaces found\n");
         } else {
-            interface = g_strdup(iface->ifa_name);
+            iface = g_strdup(addr->ifa_name);
         }
-        freeifaddrs(ifaces);
+        freeifaddrs(addrs);
     }
 
-    return interface;
+    return iface;
 }
 
 static void
@@ -96,7 +96,7 @@ io_initialize(IO *io)
 {
     ecx_contextt *context;
 
-    io->interface = NULL;
+    io->iface = NULL;
     io->group = 0;
     io->roundtrip_time = 0;
     io->ecaterror = FALSE;
@@ -134,9 +134,9 @@ io_initialize(IO *io)
 static void
 io_finalize(IO *io)
 {
-    if (io->interface != NULL) {
-        g_free(io->interface);
-        io->interface = NULL;
+    if (io->iface != NULL) {
+        g_free(io->iface);
+        io->iface = NULL;
     }
 }
 
@@ -165,7 +165,7 @@ io_start(IO *io)
     ec_slavet *slave;
     int i;
 
-    if (io->interface == NULL) {
+    if (io->iface == NULL) {
         /* IO not configured: just bail out */
         return FALSE;
     }
@@ -173,8 +173,8 @@ io_start(IO *io)
     context = &io->context;
     grp = io->grouplist + io->group;
 
-    info("Initializing SOEM on '%s'... ", io->interface);
-    if (! ecx_init(context, io->interface)) {
+    info("Initializing SOEM on '%s'... ", io->iface);
+    if (! ecx_init(context, io->iface)) {
         info("no socket connection\n");
         return FALSE;
     }
@@ -362,20 +362,20 @@ static void
 parse_args(IO *io, int argc, char *argv[])
 {
     if (argc == 1) {
-        io->interface = get_valid_interface();
+        io->iface = get_valid_interface();
     } else if (argc == 3) {
-        io->interface = g_strdup(argv[1]);
+        io->iface = g_strdup(argv[1]);
         io->group = (uint8) atoi(argv[2]);
     } else if (argc == 2) {
         if (g_strcmp0(argv[1], "-h") == 0 || g_strcmp0(argv[1], "--help") == 0) {
             usage();
         } else if (all_digits(argv[1])) {
             /* There is one number argument only */
-            io->interface = get_valid_interface();
+            io->iface = get_valid_interface();
             io->group = (uint8) atoi(argv[1]);
         } else {
             /* There is one string argument only */
-            io->interface = g_strdup(argv[1]);
+            io->iface = g_strdup(argv[1]);
         }
     } else {
         info("Invalid arguments.\n");
