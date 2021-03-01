@@ -1,14 +1,13 @@
-ethercatest_sources = files([
-    'ethercatest.c',
+ethercatest_soem_sources = files([
+    'ethercatest-soem.c',
 ])
-
-ethercatest_deps = [
+ethercatest_soem_deps = [
     glib_dep,
     soem_dep,
     thread_dep,
 ]
 
-executable('ethercatest',
-           sources: ethercatest_sources,
-           dependencies: ethercatest_deps,
+executable('ethercatest-soem',
+           sources: ethercatest_soem_sources,
+           dependencies: ethercatest_soem_deps,
            install: true)
