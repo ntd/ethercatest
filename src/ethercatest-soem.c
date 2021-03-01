@@ -56,7 +56,7 @@ typedef struct {
     ec_PDOdesct     PDOdesc[EC_MAX_MAPT];
     ec_eepromSMt    eepSM;
     ec_eepromFMMUt  eepFMMU;
-} IO;
+} Fieldbus;
 
 
 static gchar *
@@ -92,89 +92,89 @@ get_valid_interface(void)
 }
 
 static void
-io_initialize(IO *io)
+fieldbus_initialize(Fieldbus *fieldbus)
 {
     ecx_contextt *context;
 
-    io->iface = NULL;
-    io->group = 0;
-    io->roundtrip_time = 0;
-    io->ecaterror = FALSE;
+    fieldbus->iface = NULL;
+    fieldbus->group = 0;
+    fieldbus->roundtrip_time = 0;
+    fieldbus->ecaterror = FALSE;
 
     /* Initialize the ecx_contextt data structure */
-    context = &io->context;
+    context = &fieldbus->context;
 
     /* Let's start by 0-filling it, just in case further fields
      * will be appended in the future */
     memset(context, 0, sizeof(*context));
 
-    context->port = &io->port;
-    context->slavelist = io->slavelist;
-    context->slavecount = &io->slavecount;
+    context->port = &fieldbus->port;
+    context->slavelist = fieldbus->slavelist;
+    context->slavecount = &fieldbus->slavecount;
     context->maxslave = EC_MAXSLAVE;
-    context->grouplist = io->grouplist;
+    context->grouplist = fieldbus->grouplist;
     context->maxgroup = EC_MAXGROUP;
-    context->esibuf = io->esibuf;
-    context->esimap = io->esimap;
+    context->esibuf = fieldbus->esibuf;
+    context->esimap = fieldbus->esimap;
     context->esislave = 0;
-    context->elist = &io->elist;
-    context->idxstack = &io->idxstack;
-    context->ecaterror = &io->ecaterror;
-    context->DCtime = &io->DCtime;
-    context->SMcommtype = io->SMcommtype;
-    context->PDOassign = io->PDOassign;
-    context->PDOdesc = io->PDOdesc;
-    context->eepSM = &io->eepSM;
-    context->eepFMMU = &io->eepFMMU;
+    context->elist = &fieldbus->elist;
+    context->idxstack = &fieldbus->idxstack;
+    context->ecaterror = &fieldbus->ecaterror;
+    context->DCtime = &fieldbus->DCtime;
+    context->SMcommtype = fieldbus->SMcommtype;
+    context->PDOassign = fieldbus->PDOassign;
+    context->PDOdesc = fieldbus->PDOdesc;
+    context->eepSM = &fieldbus->eepSM;
+    context->eepFMMU = &fieldbus->eepFMMU;
     context->FOEhook = NULL;
     context->EOEhook = NULL;
     context->manualstatechange = 0;
 }
 
 static void
-io_finalize(IO *io)
+fieldbus_finalize(Fieldbus *fieldbus)
 {
-    if (io->iface != NULL) {
-        g_free(io->iface);
-        io->iface = NULL;
+    if (fieldbus->iface != NULL) {
+        g_free(fieldbus->iface);
+        fieldbus->iface = NULL;
     }
 }
 
 static int
-io_roundtrip(IO *io)
+fieldbus_roundtrip(Fieldbus *fieldbus)
 {
     gint64 start;
     ecx_contextt *context;
     int wkc;
 
-    context = &io->context;
+    context = &fieldbus->context;
 
     start = g_get_monotonic_time();
     ecx_send_processdata(context);
     wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
-    io->roundtrip_time = g_get_monotonic_time() - start;
+    fieldbus->roundtrip_time = g_get_monotonic_time() - start;
 
     return wkc;
 }
 
 static gboolean
-io_start(IO *io)
+fieldbus_start(Fieldbus *fieldbus)
 {
     ecx_contextt *context;
     ec_groupt *grp;
     ec_slavet *slave;
     int i;
 
-    if (io->iface == NULL) {
-        /* IO not configured: just bail out */
+    if (fieldbus->iface == NULL) {
+        /* Fieldbus not configured: just bail out */
         return FALSE;
     }
 
-    context = &io->context;
-    grp = io->grouplist + io->group;
+    context = &fieldbus->context;
+    grp = fieldbus->grouplist + fieldbus->group;
 
-    info("Initializing SOEM on '%s'... ", io->iface);
-    if (! ecx_init(context, io->iface)) {
+    info("Initializing SOEM on '%s'... ", fieldbus->iface);
+    if (! ecx_init(context, fieldbus->iface)) {
         info("no socket connection\n");
         return FALSE;
     }
@@ -185,10 +185,10 @@ io_start(IO *io)
         info("no slaves found\n");
         return FALSE;
     }
-    info("%d slaves found\n", io->slavecount);
+    info("%d slaves found\n", fieldbus->slavecount);
 
     info("Sequential mapping of I/O... ");
-    ecx_config_map_group(context, io->map, io->group);
+    ecx_config_map_group(context, fieldbus->map, fieldbus->group);
     info("done\n");
 
     info("Configuring distributed clock... ");
@@ -204,17 +204,17 @@ io_start(IO *io)
     info(grp->nsegments > 0 ? ")\n" : "\n");
 
     /* Send one valid process data to make outputs in slaves happy */
-    io_roundtrip(io);
+    fieldbus_roundtrip(fieldbus);
 
     info("Setting operational state..");
     /* Act on slave 0 (a virtual slave used for broadcasting) */
-    slave = io->slavelist;
+    slave = fieldbus->slavelist;
     slave->state = EC_STATE_OPERATIONAL;
     ecx_writestate(context, 0);
     /* Poll the result ten times before giving up */
     for (i = 0; i < 10; ++i) {
         info(".");
-        io_roundtrip(io);
+        fieldbus_roundtrip(fieldbus);
         ecx_statecheck(context, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE / 10);
         if (slave->state == EC_STATE_OPERATIONAL) {
             info(" all slaves are now operational\n");
@@ -224,8 +224,8 @@ io_start(IO *io)
 
     info(" failed");
     ecx_readstate(context);
-    for (i = 1; i <= io->slavecount; ++i) {
-        slave = io->slavelist + i;
+    for (i = 1; i <= fieldbus->slavecount; ++i) {
+        slave = fieldbus->slavelist + i;
         if (slave->state != EC_STATE_OPERATIONAL) {
             info(" slave %d is 0x%04X (AL-status=0x%04X %s)",
                  i, slave->state, slave->ALstatuscode,
@@ -238,14 +238,14 @@ io_start(IO *io)
 }
 
 static void
-io_stop(IO *io)
+fieldbus_stop(Fieldbus *fieldbus)
 {
     ecx_contextt *context;
     ec_slavet *slave;
 
-    context = &io->context;
+    context = &fieldbus->context;
     /* Act on slave 0 (a virtual slave used for broadcasting) */
-    slave = io->slavelist;
+    slave = fieldbus->slavelist;
 
     info("Requesting init state on all slaves... ");
     slave->state = EC_STATE_INIT;
@@ -258,16 +258,16 @@ io_stop(IO *io)
 }
 
 static gboolean
-io_dump(IO *io)
+fieldbus_dump(Fieldbus *fieldbus)
 {
     ec_groupt *grp;
     int n, wkc, expected_wkc;
 
-    grp = io->grouplist + io->group;
+    grp = fieldbus->grouplist + fieldbus->group;
 
-    wkc = io_roundtrip(io);
+    wkc = fieldbus_roundtrip(fieldbus);
     expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
-    info("%" G_GINT64_FORMAT " usec  WKC %d", io->roundtrip_time, wkc);
+    info("%" G_GINT64_FORMAT " usec  WKC %d", fieldbus->roundtrip_time, wkc);
     if (wkc < expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
         return FALSE;
@@ -281,25 +281,25 @@ io_dump(IO *io)
     for (n = 0; n < grp->Ibytes; ++n) {
         info(" %02X", grp->inputs[n]);
     }
-    info("  T: %" G_GINT64_FORMAT "\r", io->DCtime);
+    info("  T: %" G_GINT64_FORMAT "\r", fieldbus->DCtime);
     return TRUE;
 }
 
 static void
-io_check_state(IO *io)
+fieldbus_check_state(Fieldbus *fieldbus)
 {
     ecx_contextt *context;
     ec_groupt *grp;
     ec_slavet *slave;
     int i;
 
-    context = &io->context;
-    grp = context->grouplist + io->group;
+    context = &fieldbus->context;
+    grp = context->grouplist + fieldbus->group;
     grp->docheckstate = FALSE;
     ecx_readstate(context);
-    for (i = 1; i <= io->slavecount; ++i) {
+    for (i = 1; i <= fieldbus->slavecount; ++i) {
         slave = context->slavelist + i;
-        if (slave->group != io->group) {
+        if (slave->group != fieldbus->group) {
             /* This slave is part of another group: do nothing */
         } else if (slave->state != EC_STATE_OPERATIONAL) {
             grp->docheckstate = TRUE;
@@ -359,23 +359,23 @@ usage(void)
 }
 
 static void
-parse_args(IO *io, int argc, char *argv[])
+parse_args(Fieldbus *fieldbus, int argc, char *argv[])
 {
     if (argc == 1) {
-        io->iface = get_valid_interface();
+        fieldbus->iface = get_valid_interface();
     } else if (argc == 3) {
-        io->iface = g_strdup(argv[1]);
-        io->group = (uint8) atoi(argv[2]);
+        fieldbus->iface = g_strdup(argv[1]);
+        fieldbus->group = (uint8) atoi(argv[2]);
     } else if (argc == 2) {
         if (g_strcmp0(argv[1], "-h") == 0 || g_strcmp0(argv[1], "--help") == 0) {
             usage();
         } else if (all_digits(argv[1])) {
             /* There is one number argument only */
-            io->iface = get_valid_interface();
-            io->group = (uint8) atoi(argv[1]);
+            fieldbus->iface = get_valid_interface();
+            fieldbus->group = (uint8) atoi(argv[1]);
         } else {
             /* There is one string argument only */
-            io->iface = g_strdup(argv[1]);
+            fieldbus->iface = g_strdup(argv[1]);
         }
     } else {
         info("Invalid arguments.\n");
@@ -386,36 +386,36 @@ parse_args(IO *io, int argc, char *argv[])
 int
 main(int argc, char *argv[])
 {
-    IO io;
+    Fieldbus fieldbus;
 
-    io_initialize(&io);
-    parse_args(&io, argc, argv);
+    fieldbus_initialize(&fieldbus);
+    parse_args(&fieldbus, argc, argv);
 
-    if (io_start(&io)) {
+    if (fieldbus_start(&fieldbus)) {
         gint64 min, max;
         int i;
         min = 0;
         max = 0;
         for (i = 0; i < 10000; ++i) {
             /* Write some outputs, just for fun */
-            io.map[0] = i / 20;
+            fieldbus.map[0] = i / 20;
             info("Iteration %d:  ", i);
-            if (! io_dump(&io)) {
-                io_check_state(&io);
+            if (! fieldbus_dump(&fieldbus)) {
+                fieldbus_check_state(&fieldbus);
             } else if (i == 0) {
-                min = max = io.roundtrip_time;
-            } else if (io.roundtrip_time < min) {
-                min = io.roundtrip_time;
-            } else if (io.roundtrip_time > max) {
-                max = io.roundtrip_time;
+                min = max = fieldbus.roundtrip_time;
+            } else if (fieldbus.roundtrip_time < min) {
+                min = fieldbus.roundtrip_time;
+            } else if (fieldbus.roundtrip_time > max) {
+                max = fieldbus.roundtrip_time;
             }
             g_usleep(5000);
         }
         info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
              "  max %" G_GINT64_FORMAT "\n", min, max);
-        io_stop(&io);
+        fieldbus_stop(&fieldbus);
     }
 
-    io_finalize(&io);
+    fieldbus_finalize(&fieldbus);
     return 0;
 }
