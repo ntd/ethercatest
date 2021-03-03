@@ -281,7 +281,7 @@ fieldbus_dump(Fieldbus *fieldbus)
     for (n = 0; n < grp->Ibytes; ++n) {
         info(" %02X", grp->inputs[n]);
     }
-    info("  T: %" G_GINT64_FORMAT "\r", fieldbus->DCtime);
+    info("  T: %" G_GINT64_FORMAT "   \r", fieldbus->DCtime);
     return TRUE;
 }
 
@@ -392,10 +392,9 @@ main(int argc, char *argv[])
     parse_args(&fieldbus, argc, argv);
 
     if (fieldbus_start(&fieldbus)) {
-        gint64 min, max;
+        gint64 min_time, max_time;
         int i;
-        min = 0;
-        max = 0;
+        min_time = max_time = 0;
         for (i = 0; i < 10000; ++i) {
             /* Write some outputs, just for fun */
             fieldbus.map[0] = i / 20;
@@ -403,16 +402,16 @@ main(int argc, char *argv[])
             if (! fieldbus_dump(&fieldbus)) {
                 fieldbus_check_state(&fieldbus);
             } else if (i == 0) {
-                min = max = fieldbus.roundtrip_time;
-            } else if (fieldbus.roundtrip_time < min) {
-                min = fieldbus.roundtrip_time;
-            } else if (fieldbus.roundtrip_time > max) {
-                max = fieldbus.roundtrip_time;
+                min_time = max_time = fieldbus.roundtrip_time;
+            } else if (fieldbus.roundtrip_time < min_time) {
+                min_time = fieldbus.roundtrip_time;
+            } else if (fieldbus.roundtrip_time > max_time) {
+                max_time = fieldbus.roundtrip_time;
             }
             g_usleep(5000);
         }
         info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
-             "  max %" G_GINT64_FORMAT "\n", min, max);
+             "  max %" G_GINT64_FORMAT "\n", min_time, max_time);
         fieldbus_stop(&fieldbus);
     }
 
