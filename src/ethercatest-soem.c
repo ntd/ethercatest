@@ -35,7 +35,9 @@ typedef struct {
     ecx_contextt    context;
     gchar *         iface;
     uint8           group;
-    gint64          roundtrip_time;
+    gint64          scan_span;
+    int             wkc;
+    guint64         iteration;
 
     /* Used by the context */
     uint8           map[4096];
@@ -57,6 +59,8 @@ typedef struct {
     ec_eepromSMt    eepSM;
     ec_eepromFMMUt  eepFMMU;
 } Fieldbus;
+
+typedef gboolean (*FieldbusCallback)(Fieldbus *);
 
 
 static gchar *
@@ -98,7 +102,9 @@ fieldbus_initialize(Fieldbus *fieldbus)
 
     fieldbus->iface = NULL;
     fieldbus->group = 0;
-    fieldbus->roundtrip_time = 0;
+    fieldbus->scan_span = 0;
+    fieldbus->wkc = 0;
+    fieldbus->iteration = 0;
     fieldbus->ecaterror = FALSE;
 
     /* Initialize the ecx_contextt data structure */
@@ -140,21 +146,41 @@ fieldbus_finalize(Fieldbus *fieldbus)
     }
 }
 
-static int
+static gboolean
 fieldbus_roundtrip(Fieldbus *fieldbus)
 {
     gint64 start;
     ecx_contextt *context;
-    int wkc;
 
     context = &fieldbus->context;
 
     start = g_get_monotonic_time();
     ecx_send_processdata(context);
-    wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
-    fieldbus->roundtrip_time = g_get_monotonic_time() - start;
+    fieldbus->wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
+    fieldbus->scan_span = g_get_monotonic_time() - start;
 
-    return wkc;
+    return fieldbus->wkc > 0;
+}
+
+static gboolean
+fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
+{
+    gint64 start;
+    int rv;
+    start = g_get_monotonic_time();
+
+    /* Receive process data */
+    fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
+
+    if (callback != NULL && ! callback(fieldbus)) {
+        return FALSE;
+    }
+
+    /* Send process data */
+    rv = ecx_send_processdata(&fieldbus->context);
+
+    fieldbus->scan_span = g_get_monotonic_time() - start;
+    return rv > 0;
 }
 
 static gboolean
@@ -204,7 +230,7 @@ fieldbus_start(Fieldbus *fieldbus)
     info(grp->nsegments > 0 ? ")\n" : "\n");
 
     /* Send one valid process data to make outputs in slaves happy */
-    fieldbus_roundtrip(fieldbus);
+    ecx_send_processdata(&fieldbus->context);
 
     info("Setting operational state..");
     /* Act on slave 0 (a virtual slave used for broadcasting) */
@@ -214,7 +240,7 @@ fieldbus_start(Fieldbus *fieldbus)
     /* Poll the result ten times before giving up */
     for (i = 0; i < 10; ++i) {
         info(".");
-        fieldbus_roundtrip(fieldbus);
+        fieldbus_scan(fieldbus, NULL);
         ecx_statecheck(context, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE / 10);
         if (slave->state == EC_STATE_OPERATIONAL) {
             info(" all slaves are now operational\n");
@@ -261,14 +287,15 @@ static gboolean
 fieldbus_dump(Fieldbus *fieldbus)
 {
     ec_groupt *grp;
-    int n, wkc, expected_wkc;
+    int n, expected_wkc;
 
     grp = fieldbus->grouplist + fieldbus->group;
-
-    wkc = fieldbus_roundtrip(fieldbus);
+    /* XXX: no idea why the expected WKC should be this...
+     *      I would have used `fieldbus->slavecount` instead */
     expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
-    info("%" G_GINT64_FORMAT " usec  WKC %d", fieldbus->roundtrip_time, wkc);
-    if (wkc < expected_wkc) {
+    info("Iteration %" G_GUINT64_FORMAT ":  %" G_GINT64_FORMAT " usec  WKC %d",
+         fieldbus->iteration, fieldbus->scan_span, fieldbus->wkc);
+    if (fieldbus->wkc < expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
         return FALSE;
     }
@@ -286,7 +313,7 @@ fieldbus_dump(Fieldbus *fieldbus)
 }
 
 static void
-fieldbus_check_state(Fieldbus *fieldbus)
+fieldbus_recover(Fieldbus *fieldbus)
 {
     ecx_contextt *context;
     ec_groupt *grp;
@@ -352,66 +379,98 @@ all_digits(const gchar *string)
     return ch != string;
 }
 
-static void
-usage(void)
+static gboolean
+cycle(Fieldbus *fieldbus)
 {
-    info("Usage: ethercatest [INTERFACE] [GROUP]\n");
+    /* Show a digital counter that updates every 0.1 s (5000 us x 20)
+     * in the first 8 digital outputs */
+    fieldbus->map[0] = fieldbus->iteration / 20;
+    return TRUE;
 }
 
 static void
-parse_args(Fieldbus *fieldbus, int argc, char *argv[])
+usage(void)
 {
-    if (argc == 1) {
-        fieldbus->iface = get_valid_interface();
-    } else if (argc == 3) {
-        fieldbus->iface = g_strdup(argv[1]);
-        fieldbus->group = (uint8) atoi(argv[2]);
-    } else if (argc == 2) {
-        if (g_strcmp0(argv[1], "-h") == 0 || g_strcmp0(argv[1], "--help") == 0) {
-            usage();
-        } else if (all_digits(argv[1])) {
-            /* There is one number argument only */
-            fieldbus->iface = get_valid_interface();
-            fieldbus->group = (uint8) atoi(argv[1]);
-        } else {
-            /* There is one string argument only */
-            fieldbus->iface = g_strdup(argv[1]);
-        }
-    } else {
-        info("Invalid arguments.\n");
-        usage();
-    }
+    info("Usage: ethercatest-soem [INTERFACE] [PERIOD]\n"
+         "  [INTERFACE] Ethernet device to use (e.g. 'eth0')\n"
+         "  [PERIOD]    Scantime in us (0 for roundtrip performances)\n");
 }
 
 int
 main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
+    gulong period;
 
     fieldbus_initialize(&fieldbus);
-    parse_args(&fieldbus, argc, argv);
 
-    if (fieldbus_start(&fieldbus)) {
-        gint64 min_time, max_time;
-        int i;
-        min_time = max_time = 0;
-        for (i = 0; i < 10000; ++i) {
-            /* Write some outputs, just for fun */
-            fieldbus.map[0] = i / 20;
-            info("Iteration %d:  ", i);
-            if (! fieldbus_dump(&fieldbus)) {
-                fieldbus_check_state(&fieldbus);
-            } else if (i == 0) {
-                min_time = max_time = fieldbus.roundtrip_time;
-            } else if (fieldbus.roundtrip_time < min_time) {
-                min_time = fieldbus.roundtrip_time;
-            } else if (fieldbus.roundtrip_time > max_time) {
-                max_time = fieldbus.roundtrip_time;
-            }
-            g_usleep(5000);
+    /* Parse arguments */
+    if (argc == 1) {
+        fieldbus.iface = get_valid_interface();
+        period = 5000;
+    } else if (argc == 3) {
+        fieldbus.iface = g_strdup(argv[1]);
+        period = atoi(argv[2]);
+    } else if (argc == 2) {
+        if (g_strcmp0(argv[1], "-h") == 0 || g_strcmp0(argv[1], "--help") == 0) {
+            usage();
+        } else if (all_digits(argv[1])) {
+            /* There is one number argument only */
+            fieldbus.iface = get_valid_interface();
+            period = atoi(argv[1]);
+        } else {
+            /* There is one string argument only */
+            fieldbus.iface = g_strdup(argv[1]);
+            period = 5000;
         }
-        info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
-             "  max %" G_GINT64_FORMAT "\n", min_time, max_time);
+    } else {
+        info("Invalid arguments.\n");
+        usage();
+    }
+
+    /* On invalid arguments, `fieldbus.iface` will be empty
+     * so `fieldbus_start` will fail */
+    if (fieldbus_start(&fieldbus)) {
+        gint64 min_span = 0;
+        gint64 max_span = 0;
+        if (period == 0) {
+            while (++fieldbus.iteration < 50000) {
+                if (! fieldbus_roundtrip(&fieldbus) ||
+                    ! fieldbus_dump(&fieldbus)) {
+                    fieldbus_recover(&fieldbus);
+                } else if (max_span == 0) {
+                    min_span = max_span = fieldbus.scan_span;
+                } else if (fieldbus.scan_span < min_span) {
+                    min_span = fieldbus.scan_span;
+                } else if (fieldbus.scan_span > max_span) {
+                    max_span = fieldbus.scan_span;
+                }
+            }
+            info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
+                 "  max %" G_GINT64_FORMAT "\n", min_span, max_span);
+        } else {
+            while (++fieldbus.iteration < 10000) {
+                if (! fieldbus_scan(&fieldbus, cycle) ||
+                    ! fieldbus_dump(&fieldbus)) {
+                    fieldbus_recover(&fieldbus);
+                } else if (max_span == 0) {
+                    min_span = max_span = fieldbus.scan_span;
+                } else if (fieldbus.scan_span < min_span) {
+                    min_span = fieldbus.scan_span;
+                } else if (fieldbus.scan_span > max_span) {
+                    max_span = fieldbus.scan_span;
+                }
+                /* Wait for the next scan */
+                if (fieldbus.scan_span > period) {
+                    info("\nScan too low (%" G_GINT64_FORMAT " usec)\n",
+                         fieldbus.scan_span);
+                } else {
+                    g_usleep(period - fieldbus.scan_span);
+                }
+            }
+            info("\nTime span of scans (usec): min %" G_GINT64_FORMAT
+                 "  max %" G_GINT64_FORMAT "\n", min_span, max_span);
+        }
         fieldbus_stop(&fieldbus);
     }
 
