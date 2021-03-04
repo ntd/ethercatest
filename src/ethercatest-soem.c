@@ -405,9 +405,9 @@ main(int argc, char *argv[])
     fieldbus_initialize(&fieldbus);
 
     /* Parse arguments */
+    period = 5000;
     if (argc == 1) {
         fieldbus.iface = get_valid_interface();
-        period = 5000;
     } else if (argc == 3) {
         fieldbus.iface = g_strdup(argv[1]);
         period = atoi(argv[2]);
@@ -421,7 +421,6 @@ main(int argc, char *argv[])
         } else {
             /* There is one string argument only */
             fieldbus.iface = g_strdup(argv[1]);
-            period = 5000;
         }
     } else {
         info("Invalid arguments.\n");
