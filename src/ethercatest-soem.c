@@ -1,6 +1,6 @@
 /* Adapted from SOEM simple_test.c
  *
- * ethercatest: test EtherCAT connection by monitoring I/O.
+ * ethercatest-soem: test EtherCAT connection by monitoring I/O
  * Copyright (C) 2021  Fontana Nicola <ntd at entidi.it>
  *
  * This program is free software; you can redistribute it and/or modify
