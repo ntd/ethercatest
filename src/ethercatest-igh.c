@@ -24,9 +24,6 @@
 #define info g_print
 
 
-typedef struct TraverserData_ TraverserData;
-typedef gboolean (*TraverserCallback)(TraverserData *);
-
 typedef struct {
     ec_master_t *           master;
     ec_master_info_t        master_info;
@@ -37,15 +34,8 @@ typedef struct {
     guint64                 iteration;
 } Fieldbus;
 
-typedef struct {
-    ec_direction_t  dir;
-    unsigned        n_di;
-    unsigned        n_ai;
-    unsigned        n_do;
-    unsigned        n_ao;
-    unsigned        n_dio;
-    unsigned        n_aio;
-} TraverseConfiguration;
+typedef struct TraverserData_ TraverserData;
+typedef gboolean (*TraverserCallback)(TraverserData *);
 
 struct TraverserData_ {
     Fieldbus *          fieldbus;
@@ -62,6 +52,16 @@ struct TraverserData_ {
     ec_pdo_info_t       pdo;
     ec_pdo_entry_info_t entry;
 };
+
+typedef struct {
+    ec_direction_t  dir;
+    unsigned        n_di;
+    unsigned        n_ai;
+    unsigned        n_do;
+    unsigned        n_ao;
+    unsigned        n_dio;
+    unsigned        n_aio;
+} TraverseConfiguration;
 
 typedef gboolean (*FieldbusCallback)(Fieldbus *);
 
@@ -138,9 +138,7 @@ traverse_pdo(TraverserData *data)
         return FALSE;
     }
 
-    for (data->nentry = 0;
-         data->nentry < data->pdo.n_entries;
-         ++data->nentry) {
+    for (data->nentry = 0; data->nentry < data->pdo.n_entries; ++data->nentry) {
         if (ecrt_master_get_pdo_entry(data->fieldbus->master, data->nslave,
                                       data->nsync, data->npdo,
                                       data->nentry, &data->entry) != 0) {
