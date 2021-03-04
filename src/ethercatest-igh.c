@@ -62,12 +62,9 @@ typedef struct {
 
 typedef struct {
     ec_direction_t  dir;
-    unsigned        n_di;
-    unsigned        n_ai;
-    unsigned        n_do;
-    unsigned        n_ao;
-    unsigned        n_dio;
-    unsigned        n_aio;
+    const gchar *   prefix;
+    unsigned        channels;
+    gboolean        is_digital;
 } TraverseConfiguration;
 
 typedef gboolean (*FieldbusCallback)(Fieldbus *);
@@ -273,38 +270,33 @@ fieldbus_automapping(Fieldbus *fieldbus)
 static void
 dump_configuration(TraverseConfiguration *configuration)
 {
-    const gchar *prefix = "";
+    const gchar *dir;
 
-    if (configuration->n_di > 0) {
-        info("%s%uDI", prefix, configuration->n_di);
-        prefix = "+";
-        configuration->n_di = 0;
+    if (configuration->channels == 0) {
+        /* No configuration to dump */
+        return;
     }
-    if (configuration->n_do > 0) {
-        info("%s%uDO", prefix, configuration->n_do);
-        prefix = "+";
-        configuration->n_do = 0;
+
+    switch (configuration->dir) {
+    case EC_DIR_INPUT:
+        dir = "I";
+        break;
+    case EC_DIR_OUTPUT:
+        dir = "O";
+        break;
+    case EC_DIR_BOTH:
+        dir = "IO";
+        break;
+    default:
+        dir = "X";
+        break;
     }
-    if (configuration->n_dio > 0) {
-        info("%s%uDIO", prefix, configuration->n_dio);
-        prefix = "+";
-        configuration->n_dio = 0;
-    }
-    if (configuration->n_ai > 0) {
-        info("%s%uAI", prefix, configuration->n_ai);
-        prefix = "+";
-        configuration->n_ai = 0;
-    }
-    if (configuration->n_ao > 0) {
-        info("%s%uAI", prefix, configuration->n_ao);
-        prefix = "+";
-        configuration->n_ao = 0;
-    }
-    if (configuration->n_aio > 0) {
-        info("%s%uAIO", prefix, configuration->n_aio);
-        prefix = "+";
-        configuration->n_aio = 0;
-    }
+
+    info("%s%u%c%s", configuration->prefix, configuration->channels,
+         configuration->is_digital ? 'D' : 'A', dir);
+
+    configuration->prefix = "+";
+    configuration->channels = 0;
 }
 
 static gboolean
@@ -314,6 +306,7 @@ traverser_configurer(TraverserData *data)
     ec_slave_config_t *sc;
     int bytepos;
     unsigned bitpos;
+    gboolean is_digital;
 
     if (configuration->dir != data->sync.dir) {
         return TRUE;
@@ -328,36 +321,14 @@ traverser_configurer(TraverserData *data)
         return FALSE;
     }
 
-    /* Update counters */
-    switch (data->sync.dir) {
-
-    case EC_DIR_OUTPUT:
-        if (data->entry.bit_length <= 1) {
-            ++configuration->n_do;
-        } else {
-            ++configuration->n_ao;
-        }
-        break;
-
-    case EC_DIR_INPUT:
-        if (data->entry.bit_length <= 1) {
-            ++configuration->n_di;
-        } else {
-            ++configuration->n_ai;
-        }
-        break;
-
-    case EC_DIR_BOTH:
-        if (data->entry.bit_length <= 1) {
-            ++configuration->n_dio;
-        } else {
-            ++configuration->n_aio;
-        }
-        break;
-
-    default:
-        break;
+    /* Update configuration */
+    is_digital = data->entry.bit_length <= 1;
+    if (is_digital != configuration->is_digital) {
+        /* Dump the previous configuration */
+        dump_configuration(configuration);
     }
+    configuration->is_digital = is_digital;
+    ++configuration->channels;
 
     return TRUE;
 }
@@ -366,12 +337,8 @@ static gboolean
 fieldbus_autoconfigure(Fieldbus *fieldbus)
 {
     TraverseConfiguration configuration = {
-        .n_do = 0,
-        .n_ao = 0,
-        .n_di = 0,
-        .n_ai = 0,
-        .n_dio = 0,
-        .n_aio = 0,
+        .prefix = "",
+        .channels = 0,
     };
 
     /* Fill process data with outputs, inputs and inputoutputs in
@@ -380,18 +347,20 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
     if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
         return FALSE;
     }
+    dump_configuration(&configuration);
 
     configuration.dir = EC_DIR_INPUT;
     if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
         return FALSE;
     }
+    dump_configuration(&configuration);
 
     configuration.dir = EC_DIR_BOTH;
     if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
         return FALSE;
     }
-
     dump_configuration(&configuration);
+
     return TRUE;
 }
 
