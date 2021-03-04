@@ -17,7 +17,7 @@ and `ethercatest-igh`, based on the
 # SOEM performances
 
 The SOEM program must be run as root to be able to access the ethernet
-device. This are the results of `ethercatest-soem 0` on my idle system:
+device. These are the results of `ethercatest-soem 0` on my idle system:
 
     Roundtrip time (usec): min 104  max 599
 
@@ -47,7 +47,7 @@ The IgH program requires a couple of kernel modules: `ec_master` and an
 EtherCAT device. In my tests I used the generic EtherCAT device
 (`ec_generic`). The user running the program must be able to access the
 EtherCAT device created by the IgH code (typically `/dev/EtherCAT0`).
-This are the results of `ethercatest-igh 0` on my idle system:
+These are the results of `ethercatest-igh 0` on my idle system:
 
     Roundtrip time (usec): min 156  max 49476
     Roundtrip time (usec): min 92  max 49438
