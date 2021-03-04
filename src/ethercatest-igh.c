@@ -54,6 +54,13 @@ struct TraverserData_ {
 };
 
 typedef struct {
+    int nslave;
+    int nsync;
+    int npdo;
+    int nentry;
+} TraverseMapping;
+
+typedef struct {
     ec_direction_t  dir;
     unsigned        n_di;
     unsigned        n_ai;
@@ -218,6 +225,51 @@ traverser_get_slave_config(TraverserData *data)
     return sc;
 }
 
+static gboolean
+traverser_mapper(TraverserData *data)
+{
+    TraverseMapping *mapping = data->context;
+
+    if (data->nslave != mapping->nslave) {
+        /* Mapping new slave */
+        mapping->nslave = data->nslave;
+        mapping->nsync  = -1;
+    }
+    if (data->nsync != mapping->nsync) {
+        /* Mapping new sync manager */
+        mapping->nsync = data->nsync;
+        mapping->npdo  = -1;
+    }
+    if (data->npdo != mapping->npdo) {
+        /* Mapping new PDO */
+        ec_slave_config_t *sc = traverser_get_slave_config(data);
+        mapping->npdo = data->npdo;
+        if (data->npdo == 0) {
+            ecrt_slave_config_pdo_assign_clear(sc, data->nsync);
+        }
+        ecrt_slave_config_pdo_assign_add(sc, data->nsync, data->npdo);
+        ecrt_slave_config_pdo_mapping_clear(sc, data->npdo);
+        ecrt_slave_config_pdo_mapping_add(sc, data->npdo,
+                                          data->entry.index,
+                                          data->entry.subindex,
+                                          data->entry.bit_length);
+    }
+
+    return TRUE;
+}
+
+static gboolean
+fieldbus_automapping(Fieldbus *fieldbus)
+{
+    TraverseMapping mapping = {
+        .nslave = -1,
+        .nsync  = -1,
+        .npdo   = -1,
+        .nentry = -1,
+    };
+    return fieldbus_traverse_pdo_entries(fieldbus, traverser_mapper, &mapping);
+}
+
 static void
 dump_configuration(TraverseConfiguration *configuration)
 {
@@ -372,6 +424,15 @@ fieldbus_start(Fieldbus *fieldbus)
     }
     info("done\n");
 
+    /* This is not strictly needed (the slaves should have been
+     * already mapped in this way) but... just in case */
+    info("Automapping slaves... ");
+    if (! fieldbus_automapping(fieldbus)) {
+        return FALSE;
+    }
+    info("%d slaves mapped\n", fieldbus->master_info.slave_count);
+
+    info("\n");
     info("Autoconfiguring slaves... ");
     if (! fieldbus_autoconfigure(fieldbus)) {
         return FALSE;
