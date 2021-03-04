@@ -432,7 +432,6 @@ fieldbus_start(Fieldbus *fieldbus)
     }
     info("%d slaves mapped\n", fieldbus->master_info.slave_count);
 
-    info("\n");
     info("Autoconfiguring slaves... ");
     if (! fieldbus_autoconfigure(fieldbus)) {
         return FALSE;
