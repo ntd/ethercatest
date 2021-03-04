@@ -12,7 +12,7 @@ Major differences from `simple_test`:
 
 Two similar programs are provided: `ethercatest-soem`, based on SOEM,
 and `ethercatest-igh`, based on the
-(IgH EtherCAT)[https://etherlab.org/en/ethercat/] software stack.
+[IgH EtherCAT](https://etherlab.org/en/ethercat/) software stack.
 
 # SOEM performances
 
