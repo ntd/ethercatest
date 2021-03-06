@@ -360,6 +360,7 @@ fieldbus_start(Fieldbus *fieldbus)
 {
     struct sched_param param;
     ec_master_state_t master;
+    int n;
 
     if (fieldbus->master != NULL) {
         /* Fieldbus already configured: just bail out */
@@ -421,18 +422,27 @@ fieldbus_start(Fieldbus *fieldbus)
     }
     info("set to %i\n", param.sched_priority);
 
-    info("Waiting all slaves in PREOP+OP state... ");
-    for (int n = 0; n < 5000; ++n) {
+    info("Waiting all slaves in OP state... ");
+    for (n = 0; n < 5000; ++n) {
         ecrt_master_send(fieldbus->master);
         ecrt_master_receive(fieldbus->master);
         ecrt_master_state(fieldbus->master, &master);
-        if (master.al_states == (EC_AL_STATE_PREOP | EC_AL_STATE_OP)) {
+        if (master.al_states == EC_AL_STATE_OP) {
             break;
         }
         g_usleep(100);
     }
-    if (master.al_states != (EC_AL_STATE_PREOP | EC_AL_STATE_OP)) {
-        info("failed\n");
+    if (master.al_states != EC_AL_STATE_OP) {
+        const gchar *prefix = "";
+        ec_slave_info_t slave_info;
+        for (n = 0; n < fieldbus->master_info.slave_count; ++n) {
+            ecrt_master_get_slave(fieldbus->master, n, &slave_info);
+            if (slave_info.al_state != EC_AL_STATE_OP) {
+                info("%s%s still in %u", prefix, slave_info.name, slave_info.al_state);
+                prefix = ", ";
+            }
+        }
+        info("\n");
         return FALSE;
     }
     info("done\n");
