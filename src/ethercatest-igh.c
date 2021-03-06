@@ -284,9 +284,6 @@ dump_configuration(TraverseConfiguration *configuration)
     case EC_DIR_OUTPUT:
         dir = "O";
         break;
-    case EC_DIR_BOTH:
-        dir = "IO";
-        break;
     default:
         dir = "X";
         break;
@@ -341,8 +338,8 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
         .channels = 0,
     };
 
-    /* Fill process data with outputs, inputs and inputoutputs in
-     * sequential order, similarily to what done by SOEM legacy */
+    /* Fill process data with outputs first and inputs last,
+     * similarily to what done by SOEM legacy */
     configuration.dir = EC_DIR_OUTPUT;
     if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
         return FALSE;
@@ -350,12 +347,6 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
     dump_configuration(&configuration);
 
     configuration.dir = EC_DIR_INPUT;
-    if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
-        return FALSE;
-    }
-    dump_configuration(&configuration);
-
-    configuration.dir = EC_DIR_BOTH;
     if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
         return FALSE;
     }
