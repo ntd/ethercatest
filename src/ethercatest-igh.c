@@ -97,6 +97,7 @@ fieldbus_roundtrip(Fieldbus *fieldbus)
 
     /* Receive process data */
     do {
+        g_usleep(5);
         ecrt_master_receive(fieldbus->master);
         ecrt_domain_process(fieldbus->domain1);
         ecrt_domain_state(fieldbus->domain1, &fieldbus->domain1_state);

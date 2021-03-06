@@ -49,12 +49,16 @@ EtherCAT device. In my tests I used the generic EtherCAT device
 EtherCAT device created by the IgH code (typically `/dev/EtherCAT0`).
 These are the results of `ethercatest-igh 0` on my idle system:
 
-    Roundtrip time (usec): min 156  max 49476
-    Roundtrip time (usec): min 92  max 49438
-    Roundtrip time (usec): min 197  max 49551
+    Roundtrip time (usec): min 190  max 350
 
-Checking the contents to see where those numbers come from, I see the
-roundtrip time is almost always around 250 us but every 5000/10000
-samples there is a spike of about 49000 us. No idea what the cause is,
-but in the log I see some cryptic messages (`Domain 0: 7350 working
-counter changes - now 0/3.`) that maybe are related.
+Output on the same system while building a project in another console:
+
+    Roundtrip time (usec): min 127  max 398
+    Roundtrip time (usec): min 122  max 405
+    Roundtrip time (usec): min 148  max 353
+    Roundtrip time (usec): min 121  max 382
+
+
+In this case the performances are **much** more consistent and stable.
+I suspect by using a dedicated driver instead of `ec_generic` would
+gain some speed.
