@@ -1,23 +1,49 @@
-This is basically a rewrite of the `simple_test` program included in the
-[SOEM](https://github.com/OpenEtherCATSociety/SOEM) project.
+This is basically a rewrite of the `simple_test` program included in
+the SOEM project, meant to highlight the differences between
+[SOEM](https://github.com/OpenEtherCATSociety/SOEM) and
+[IgH-EtherCAT](https://etherlab.org/en/ethercat/).
 
 Major differences from `simple_test`:
-* this is a self contained project, meant to highlight the differences
-  between SOEM and igh-ethercat;
-* the threaded code has been removed: no idea what was there for;
+* this is a self contained project;
+* the threaded code has been removed;
 * the SOEM version uses the new APIs intead of the legacy ones;
-* GLib has been added as dependency, just for my own convenience;
-* if the period is explicitely set to `0` in the arguments, it
-  measures the roundtrip performances.
+* GLib has been added as dependency, just for convenience;
+* by default it updates (every 5000 us, customizable in the arguments)
+  a binary counter on the first 8 digital outputs; if you explicitely
+  set the period to `0`, it measures the roundtrip performances.
 
-Two similar programs are provided: `ethercatest-soem`, based on SOEM,
-and `ethercatest-igh`, based on the
-[IgH EtherCAT](https://etherlab.org/en/ethercat/) software stack.
+Two implementations are provided: `ethercatest-soem`, based on SOEM,
+and `ethercatest-igh`, based on the IgH-EtherCAT software stack.
 
-# SOEM performances
+# Performances
 
-The SOEM program must be run as root to be able to access the ethernet
-device. These are the results of `ethercatest-soem 0` on my idle system:
+The two projects are really different.
+
+SOEM is just a userspace library. It is really easy use: you just
+need to link your application to it (statically, by default) and
+you are ready to go. To be able to access the raw Ethernet device,
+the SOEM program must be run as root.
+
+The IgH EtherCAT stack instead is much more complex. A couple of
+kernel modules must be loaded before the application: `ec_master`
+and an EtherCAT device. In these tests, the generic EtherCAT device
+(`ec_generic`) was used. After that, the application must be linked
+to a userspace library. The user running the program must be able
+to access the EtherCAT device created by the IgH modules, typically
+`/dev/EtherCAT0`. This is usually owned by root but, by leveraging
+the `udev` infrastructure, you can change ownership and mode to be
+able to access it from a normal user.
+
+The master hardware is a consumer PC with an i7-7700T CPU at 2.90 GHz.
+The NIC interface is an e1000e Intel-based operating at 100 MBit/s.
+A quite recent linux kernel (5.11.2) was used.
+
+The PC is connected with a 2 m category 5 UTP cable to a Beckhoff node
+with three slaves: one EK1100, one EL1809 and one EL2808.
+
+## SOEM results
+
+These are the results of `ethercatest-soem 0` on an idle system:
 
     Roundtrip time (usec): min 104  max 599
 
@@ -41,13 +67,9 @@ give quite different results, e.g.:
     Roundtrip time (usec): min 190  max 731
     Roundtrip time (usec): min 169  max 590
 
-# igh-ethercat performances
+## igh-ethercat results
 
-The IgH program requires a couple of kernel modules: `ec_master` and an
-EtherCAT device. In my tests I used the generic EtherCAT device
-(`ec_generic`). The user running the program must be able to access the
-EtherCAT device created by the IgH code (typically `/dev/EtherCAT0`).
-These are the results of `ethercatest-igh 0` on my idle system:
+These are the results of `ethercatest-igh 0` on an idle system:
 
     Roundtrip time (usec): min 190  max 350
 
@@ -58,7 +80,7 @@ Output on the same system while building a project in another console:
     Roundtrip time (usec): min 148  max 353
     Roundtrip time (usec): min 121  max 382
 
-
 In this case the performances are **much** more consistent and stable.
-I suspect by using a dedicated driver instead of `ec_generic` would
-gain some speed.
+By using a dedicated driver instead of `ec_generic` the results would
+likely be lower. The problem is the dedicated drivers must be kept in
+sync with the kernel, and this could become a maintenance nightmare.
