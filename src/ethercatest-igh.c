@@ -463,7 +463,7 @@ fieldbus_dump(Fieldbus *fieldbus)
     int expected_wkc = fieldbus->master_info.slave_count;
     int i;
 
-    info("Iteration %lu:  %li usec WKC %d",
+    info("Iteration %" PRIu64 ":  %" PRId64 " usec WKC %d",
          fieldbus->iteration, fieldbus->scan_span, wkc);
     if (wkc != expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
@@ -538,7 +538,7 @@ main(int argc, char *argv[])
                     max_span = fieldbus.scan_span;
                 }
             }
-            info("\nRoundtrip time (usec): min %li  max %li\n",
+            info("\nRoundtrip time (usec): min %" PRId64 "  max %" PRId64 "\n",
                  min_span, max_span);
         } else {
             while (++fieldbus.iteration < 10000) {
@@ -554,12 +554,12 @@ main(int argc, char *argv[])
                 }
                 /* Wait for the next scan */
                 if (fieldbus.scan_span > period) {
-                    info("\nScan too low (%li usec)\n", fieldbus.scan_span);
+                    info("\nScan too low (%" PRId64 " usec)\n", fieldbus.scan_span);
                 } else {
                     usleep(period - fieldbus.scan_span);
                 }
             }
-            info("\nTime span of scans (usec): min %li  max %li\n",
+            info("\nTime span of scans (usec): min %" PRId64 "  max %" PRId64 "\n",
                  min_span, max_span);
         }
         fieldbus_stop(&fieldbus);
