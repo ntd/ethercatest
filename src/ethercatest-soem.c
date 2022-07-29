@@ -19,33 +19,32 @@
  */
 
 #include <soem/ethercat.h>
-#include <glib.h>
 #include <soem/ethercattype.h>
-#include <stdlib.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include "ethercatest.h"
 
 #define MUST_BE_ON  IFF_UP
 #define MUST_BE_OFF (IFF_LOOPBACK | IFF_POINTOPOINT)
-#define info g_print
 
 
 typedef struct {
     ecx_contextt    context;
-    gchar *         iface;
-    uint8           group;
-    gint64          scan_span;
+    char *          iface;
+    uint8_t         group;
+    int64_t         scan_span;
     int             wkc;
-    guint64         iteration;
+    uint64_t        iteration;
 
     /* Used by the context */
-    uint8           map[4096];
+    uint8_t         map[4096];
     ecx_portt       port;
     ec_slavet       slavelist[EC_MAXSLAVE];
     int             slavecount;
     ec_groupt       grouplist[EC_MAXGROUP];
-    uint8           esibuf[EC_MAXEEPBUF];
+    uint8_t         esibuf[EC_MAXEEPBUF];
     uint32          esimap[EC_MAXEEPBITMAP];
     /* I would say this needs to be elist[EC_MAXELIST],
      * but the source code of SOEM does not agree with me */
@@ -60,13 +59,13 @@ typedef struct {
     ec_eepromFMMUt  eepFMMU;
 } Fieldbus;
 
-typedef gboolean (*FieldbusCallback)(Fieldbus *);
+typedef int (*FieldbusCallback)(Fieldbus *);
 
 
-static gchar *
+static char *
 get_valid_interface(void)
 {
-    gchar *iface;
+    char *iface;
     struct ifaddrs *addrs;
 
     iface = NULL;
@@ -87,7 +86,7 @@ get_valid_interface(void)
         if (addr == NULL) {
             info("No valid interfaces found\n");
         } else {
-            iface = g_strdup(addr->ifa_name);
+            iface = strdup(addr->ifa_name);
         }
         freeifaddrs(addrs);
     }
@@ -141,33 +140,33 @@ static void
 fieldbus_finalize(Fieldbus *fieldbus)
 {
     if (fieldbus->iface != NULL) {
-        g_free(fieldbus->iface);
+        free(fieldbus->iface);
         fieldbus->iface = NULL;
     }
 }
 
-static gboolean
+static int
 fieldbus_roundtrip(Fieldbus *fieldbus)
 {
-    gint64 start;
+    int64_t start;
     ecx_contextt *context;
 
     context = &fieldbus->context;
 
-    start = g_get_monotonic_time();
+    start = get_monotonic_time();
     ecx_send_processdata(context);
     fieldbus->wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
-    fieldbus->scan_span = g_get_monotonic_time() - start;
+    fieldbus->scan_span = get_monotonic_time() - start;
 
     return fieldbus->wkc > 0;
 }
 
-static gboolean
+static int
 fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
 {
-    gint64 start;
+    int64_t start;
     int rv;
-    start = g_get_monotonic_time();
+    start = get_monotonic_time();
 
     /* Receive process data */
     fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
@@ -179,11 +178,11 @@ fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
     /* Send process data */
     rv = ecx_send_processdata(&fieldbus->context);
 
-    fieldbus->scan_span = g_get_monotonic_time() - start;
+    fieldbus->scan_span = get_monotonic_time() - start;
     return rv > 0;
 }
 
-static gboolean
+static int
 fieldbus_start(Fieldbus *fieldbus)
 {
     ecx_contextt *context;
@@ -283,7 +282,7 @@ fieldbus_stop(Fieldbus *fieldbus)
     info("done\n");
 }
 
-static gboolean
+static int
 fieldbus_dump(Fieldbus *fieldbus)
 {
     ec_groupt *grp;
@@ -293,7 +292,7 @@ fieldbus_dump(Fieldbus *fieldbus)
     /* XXX: no idea why the expected WKC should be this...
      *      I would have used `fieldbus->slavecount` instead */
     expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
-    info("Iteration %" G_GUINT64_FORMAT ":  %" G_GINT64_FORMAT " usec  WKC %d",
+    info("Iteration %lu:  %li usec  WKC %d",
          fieldbus->iteration, fieldbus->scan_span, fieldbus->wkc);
     if (fieldbus->wkc < expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
@@ -308,7 +307,7 @@ fieldbus_dump(Fieldbus *fieldbus)
     for (n = 0; n < grp->Ibytes; ++n) {
         info(" %02X", grp->inputs[n]);
     }
-    info("  T: %" G_GINT64_FORMAT "   \r", fieldbus->DCtime);
+    info("  T: %li   \r", fieldbus->DCtime);
     return TRUE;
 }
 
@@ -366,12 +365,12 @@ fieldbus_recover(Fieldbus *fieldbus)
     }
 }
 
-static gboolean
-all_digits(const gchar *string)
+static int
+all_digits(const char *string)
 {
-    const gchar *ch;
+    const char *ch;
     for (ch = string; *ch != '\0'; ++ch) {
-        if (! g_ascii_isdigit(*ch)) {
+        if (! isdigit(*ch)) {
             return FALSE;
         }
     }
@@ -379,7 +378,7 @@ all_digits(const gchar *string)
     return ch != string;
 }
 
-static gboolean
+static int
 cycle(Fieldbus *fieldbus)
 {
     /* Show a digital counter that updates every 0.1 s (5000 us x 20)
@@ -400,7 +399,7 @@ int
 main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
-    gulong period;
+    unsigned long period;
 
     fieldbus_initialize(&fieldbus);
 
@@ -409,10 +408,10 @@ main(int argc, char *argv[])
     if (argc == 1) {
         fieldbus.iface = get_valid_interface();
     } else if (argc == 3) {
-        fieldbus.iface = g_strdup(argv[1]);
+        fieldbus.iface = strdup(argv[1]);
         period = atoi(argv[2]);
     } else if (argc == 2) {
-        if (g_strcmp0(argv[1], "-h") == 0 || g_strcmp0(argv[1], "--help") == 0) {
+        if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             usage();
         } else if (all_digits(argv[1])) {
             /* There is one number argument only */
@@ -420,7 +419,7 @@ main(int argc, char *argv[])
             period = atoi(argv[1]);
         } else {
             /* There is one string argument only */
-            fieldbus.iface = g_strdup(argv[1]);
+            fieldbus.iface = strdup(argv[1]);
         }
     } else {
         info("Invalid arguments.\n");
@@ -430,8 +429,8 @@ main(int argc, char *argv[])
     /* On invalid arguments, `fieldbus.iface` will be empty
      * so `fieldbus_start` will fail */
     if (fieldbus_start(&fieldbus)) {
-        gint64 min_span = 0;
-        gint64 max_span = 0;
+        int64_t min_span = 0;
+        int64_t max_span = 0;
         if (period == 0) {
             while (++fieldbus.iteration < 50000) {
                 if (! fieldbus_roundtrip(&fieldbus) ||
@@ -445,8 +444,8 @@ main(int argc, char *argv[])
                     max_span = fieldbus.scan_span;
                 }
             }
-            info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
-                 "  max %" G_GINT64_FORMAT "\n", min_span, max_span);
+            info("\nRoundtrip time (usec): min %li  max %li\n",
+                 min_span, max_span);
         } else {
             while (++fieldbus.iteration < 10000) {
                 if (! fieldbus_scan(&fieldbus, cycle) ||
@@ -461,14 +460,13 @@ main(int argc, char *argv[])
                 }
                 /* Wait for the next scan */
                 if (fieldbus.scan_span > period) {
-                    info("\nScan too low (%" G_GINT64_FORMAT " usec)\n",
-                         fieldbus.scan_span);
+                    info("\nScan too low (%li usec)\n", fieldbus.scan_span);
                 } else {
-                    g_usleep(period - fieldbus.scan_span);
+                    usleep(period - fieldbus.scan_span);
                 }
             }
-            info("\nTime span of scans (usec): min %" G_GINT64_FORMAT
-                 "  max %" G_GINT64_FORMAT "\n", min_span, max_span);
+            info("\nTime span of scans (usec): min %li  max %li\n",
+                 min_span, max_span);
         }
         fieldbus_stop(&fieldbus);
     }

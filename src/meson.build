@@ -1,8 +1,9 @@
 ethercatest_soem_sources = files([
     'ethercatest-soem.c',
+    'ethercatest.c',
+    'ethercatest.h',
 ])
 ethercatest_soem_deps = [
-    glib_dep,
     soem_dep,
     thread_dep,
 ]
@@ -13,9 +14,10 @@ executable('ethercatest-soem',
 
 ethercatest_igh_sources = files([
     'ethercatest-igh.c',
+    'ethercatest.c',
+    'ethercatest.h',
 ])
 ethercatest_igh_deps = [
-    glib_dep,
     igh_dep,
 ]
 executable('ethercatest-igh',

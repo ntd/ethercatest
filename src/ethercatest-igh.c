@@ -1,6 +1,6 @@
 /* Port of ethercatest-soem to IgH ethercat
  *
- * ethercatest-itg: test EtherCAT connection by monitoring I/O
+ * ethercatest-igh: test EtherCAT connection by monitoring I/O
  * Copyright (C) 2021  Fontana Nicola <ntd at entidi.it>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -19,9 +19,7 @@
  */
 
 #include <ecrt.h>
-#include <glib.h>
-
-#define info g_print
+#include "ethercatest.h"
 
 
 typedef struct {
@@ -30,17 +28,17 @@ typedef struct {
     ec_domain_t *           domain1;
     uint8_t *               map;
     ec_domain_state_t       domain1_state;
-    gint64                  scan_span;
-    guint64                 iteration;
+    int64_t                 scan_span;
+    uint64_t                iteration;
 } Fieldbus;
 
 typedef struct TraverserData_ TraverserData;
-typedef gboolean (*TraverserCallback)(TraverserData *);
+typedef int (*TraverserCallback)(TraverserData *);
 
 struct TraverserData_ {
     Fieldbus *          fieldbus;
     TraverserCallback   callback;
-    gpointer            context;
+    void *              context;
 
     int                 nslave;
     int                 nsync;
@@ -62,12 +60,12 @@ typedef struct {
 
 typedef struct {
     ec_direction_t  dir;
-    const gchar *   prefix;
+    const char *    prefix;
     unsigned        channels;
-    gboolean        is_digital;
+    int             is_digital;
 } TraverseConfiguration;
 
-typedef gboolean (*FieldbusCallback)(Fieldbus *);
+typedef int (*FieldbusCallback)(Fieldbus *);
 
 
 static void
@@ -86,10 +84,10 @@ fieldbus_finalize(Fieldbus *fieldbus)
     /* Nothing to do */
 }
 
-static gboolean
+static int
 fieldbus_roundtrip(Fieldbus *fieldbus)
 {
-    gint64 start = g_get_monotonic_time();
+    int64_t start = get_monotonic_time();
 
     /* Send process data */
     ecrt_domain_queue(fieldbus->domain1);
@@ -97,20 +95,20 @@ fieldbus_roundtrip(Fieldbus *fieldbus)
 
     /* Receive process data */
     do {
-        g_usleep(5);
+        usleep(5);
         ecrt_master_receive(fieldbus->master);
         ecrt_domain_process(fieldbus->domain1);
         ecrt_domain_state(fieldbus->domain1, &fieldbus->domain1_state);
-        fieldbus->scan_span = g_get_monotonic_time() - start;
+        fieldbus->scan_span = get_monotonic_time() - start;
     } while (fieldbus->scan_span < 1000000 && fieldbus->domain1_state.wc_state != EC_WC_COMPLETE);
 
     return fieldbus->domain1_state.wc_state == EC_WC_COMPLETE;
 }
 
-static gboolean
+static int
 fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
 {
-    gint64 start = g_get_monotonic_time();
+    int64_t start = get_monotonic_time();
 
     /* Skip the receiving on the first iteration (nothing to receive) */
     if (fieldbus->iteration > 1) {
@@ -128,11 +126,11 @@ fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
     ecrt_domain_queue(fieldbus->domain1);
     ecrt_master_send(fieldbus->master);
 
-    fieldbus->scan_span = g_get_monotonic_time() - start;
+    fieldbus->scan_span = get_monotonic_time() - start;
     return fieldbus->domain1_state.wc_state != EC_WC_INCOMPLETE;
 }
 
-static gboolean
+static int
 traverse_pdo(TraverserData *data)
 {
     if (ecrt_master_get_pdo(data->fieldbus->master,
@@ -158,7 +156,7 @@ traverse_pdo(TraverserData *data)
     return TRUE;
 }
 
-static gboolean
+static int
 traverse_sync(TraverserData *data)
 {
     if (ecrt_master_get_sync_manager(data->fieldbus->master,
@@ -177,7 +175,7 @@ traverse_sync(TraverserData *data)
     return TRUE;
 }
 
-static gboolean
+static int
 traverse_slave(TraverserData *data)
 {
     if (ecrt_master_get_slave(data->fieldbus->master,
@@ -194,9 +192,9 @@ traverse_slave(TraverserData *data)
     return TRUE;
 }
 
-static gboolean
+static int
 fieldbus_traverse_pdo_entries(Fieldbus *fieldbus,
-                              TraverserCallback callback, gpointer context)
+                              TraverserCallback callback, void *context)
 {
     TraverserData data;
     data.fieldbus = fieldbus;
@@ -223,7 +221,7 @@ traverser_get_slave_config(TraverserData *data)
     return sc;
 }
 
-static gboolean
+static int
 traverser_mapper(TraverserData *data)
 {
     TraverseMapping *mapping = data->context;
@@ -256,7 +254,7 @@ traverser_mapper(TraverserData *data)
     return TRUE;
 }
 
-static gboolean
+static int
 fieldbus_automapping(Fieldbus *fieldbus)
 {
     TraverseMapping mapping = {
@@ -271,7 +269,7 @@ fieldbus_automapping(Fieldbus *fieldbus)
 static void
 dump_configuration(TraverseConfiguration *configuration)
 {
-    const gchar *dir;
+    const char *dir;
 
     if (configuration->channels == 0) {
         /* No configuration to dump */
@@ -297,14 +295,14 @@ dump_configuration(TraverseConfiguration *configuration)
     configuration->channels = 0;
 }
 
-static gboolean
+static int
 traverser_configurer(TraverserData *data)
 {
     TraverseConfiguration *configuration = data->context;
     ec_slave_config_t *sc;
     int bytepos;
     unsigned bitpos;
-    gboolean is_digital;
+    int is_digital;
 
     if (configuration->dir != data->sync.dir) {
         return TRUE;
@@ -331,7 +329,7 @@ traverser_configurer(TraverserData *data)
     return TRUE;
 }
 
-static gboolean
+static int
 fieldbus_autoconfigure(Fieldbus *fieldbus)
 {
     TraverseConfiguration configuration = {
@@ -356,10 +354,9 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
     return TRUE;
 }
 
-static gboolean
+static int
 fieldbus_start(Fieldbus *fieldbus)
 {
-    struct sched_param param;
     ec_master_state_t master;
     int n;
 
@@ -415,14 +412,6 @@ fieldbus_start(Fieldbus *fieldbus)
     }
     info("done\n");
 
-    info("Setting priority... ");
-    param.sched_priority = sched_get_priority_max(SCHED_FIFO);
-    if (sched_setscheduler(0, SCHED_FIFO, &param) == -1) {
-        info("failed\n");
-        return FALSE;
-    }
-    info("set to %i\n", param.sched_priority);
-
     info("Waiting all slaves in OP state... ");
     for (n = 0; n < 5000; ++n) {
         ecrt_master_send(fieldbus->master);
@@ -431,10 +420,10 @@ fieldbus_start(Fieldbus *fieldbus)
         if (master.al_states == EC_AL_STATE_OP) {
             break;
         }
-        g_usleep(100);
+        usleep(100);
     }
     if (master.al_states != EC_AL_STATE_OP) {
-        const gchar *prefix = "";
+        const char *prefix = "";
         ec_slave_info_t slave_info;
         for (n = 0; n < fieldbus->master_info.slave_count; ++n) {
             ecrt_master_get_slave(fieldbus->master, n, &slave_info);
@@ -467,14 +456,14 @@ fieldbus_stop(Fieldbus *fieldbus)
     }
 }
 
-static gboolean
+static int
 fieldbus_dump(Fieldbus *fieldbus)
 {
     int wkc = fieldbus->domain1_state.working_counter;
     int expected_wkc = fieldbus->master_info.slave_count;
     int i;
 
-    info("Iteration %" G_GUINT64_FORMAT ":  %" G_GINT64_FORMAT " usec WKC %d",
+    info("Iteration %lu:  %li usec WKC %d",
          fieldbus->iteration, fieldbus->scan_span, wkc);
     if (wkc != expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
@@ -495,7 +484,7 @@ fieldbus_recover(Fieldbus *fieldbus)
     /* TODO */
 }
 
-static gboolean
+static int
 cycle(Fieldbus *fieldbus)
 {
     /* Show a digital counter that updates every 0.1 s (5000 us x 20)
@@ -511,10 +500,11 @@ usage(void)
          "  [PERIOD] Scantime in us (0 for roundtrip performances)\n");
 }
 
-int main(int argc, char **argv)
+int
+main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
-    gulong period;
+    unsigned long period;
 
     fieldbus_initialize(&fieldbus);
 
@@ -525,7 +515,7 @@ int main(int argc, char **argv)
         info("Too many arguments.\n");
         usage();
         return 0;
-    } else if (g_strcmp0(argv[1], "-h") == 0 || g_strcmp0(argv[1], "--help") == 0) {
+    } else if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
         usage();
         return 0;
     } else {
@@ -533,8 +523,8 @@ int main(int argc, char **argv)
     }
 
     if (fieldbus_start(&fieldbus)) {
-        gint64 min_span = 0;
-        gint64 max_span = 0;
+        int64_t min_span = 0;
+        int64_t max_span = 0;
         if (period == 0) {
             while (++fieldbus.iteration < 50000) {
                 if (! fieldbus_roundtrip(&fieldbus) ||
@@ -548,8 +538,8 @@ int main(int argc, char **argv)
                     max_span = fieldbus.scan_span;
                 }
             }
-            info("\nRoundtrip time (usec): min %" G_GINT64_FORMAT
-                 "  max %" G_GINT64_FORMAT "\n", min_span, max_span);
+            info("\nRoundtrip time (usec): min %li  max %li\n",
+                 min_span, max_span);
         } else {
             while (++fieldbus.iteration < 10000) {
                 if (! fieldbus_scan(&fieldbus, cycle) ||
@@ -564,14 +554,13 @@ int main(int argc, char **argv)
                 }
                 /* Wait for the next scan */
                 if (fieldbus.scan_span > period) {
-                    info("\nScan too low (%" G_GINT64_FORMAT " usec)\n",
-                         fieldbus.scan_span);
+                    info("\nScan too low (%li usec)\n", fieldbus.scan_span);
                 } else {
-                    g_usleep(period - fieldbus.scan_span);
+                    usleep(period - fieldbus.scan_span);
                 }
             }
-            info("\nTime span of scans (usec): min %" G_GINT64_FORMAT
-                 "  max %" G_GINT64_FORMAT "\n", min_span, max_span);
+            info("\nTime span of scans (usec): min %li  max %li\n",
+                 min_span, max_span);
         }
         fieldbus_stop(&fieldbus);
     }

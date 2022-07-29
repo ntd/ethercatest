@@ -7,7 +7,6 @@ Major differences from `simple_test`:
 * this is a self contained project;
 * the threaded code has been removed;
 * the SOEM version uses the new APIs intead of the legacy ones;
-* GLib has been added as dependency, just for convenience;
 * by default it updates (every 5000 us, customizable in the arguments)
   a binary counter on the first 8 digital outputs; if you explicitely
   set the period to `0`, it measures the roundtrip performances.
