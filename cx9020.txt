@@ -1,0 +1,22 @@
+# CX9020 `--cross-file` for meson
+
+[binaries]
+c = '/usr/bin/arm-linux-gnueabihf-gcc'
+cpp = '/usr/bin/arm-linux-gnueabihf-g++'
+ar = '/usr/arm-linux-gnueabihf/bin/ar'
+strip = '/usr/arm-linux-gnueabihf/bin/strip'
+pkgconfig = '/usr/bin/arm-linux-gnueabihf-pkg-config'
+
+[properties]
+root = '/usr/arm-linux-gnueabihf'
+
+# -U_FILE_OFFSET_BITS requires meson >= 0.46:
+# https://github.com/mesonbuild/meson/pull/2996
+c_args = ['-U_FILE_OFFSET_BITS', '-I/root/CX9020/ethercat-hg/include']
+c_link_args = ['-L/root/CX9020/ethercat-hg/lib/.libs']
+
+[host_machine]
+system = 'linux'
+cpu_family = 'arm'
+cpu = 'armv7'
+endian = 'little'
