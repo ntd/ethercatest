@@ -460,15 +460,10 @@ static int
 fieldbus_dump(Fieldbus *fieldbus)
 {
     int wkc = fieldbus->domain1_state.working_counter;
-    int expected_wkc = fieldbus->master_info.slave_count;
     int i;
 
     info("Iteration %" PRIu64 ":  %" PRId64 " usec WKC %d",
          fieldbus->iteration, fieldbus->scan_span, wkc);
-    if (wkc != expected_wkc) {
-        info(" wrong (expected %d)\n", expected_wkc);
-        return FALSE;
-    }
 
     for (i = 0; i < ecrt_domain_size(fieldbus->domain1); ++i) {
         info(" %02X", fieldbus->map[i]);
