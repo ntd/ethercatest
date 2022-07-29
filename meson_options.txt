@@ -1,0 +1,9 @@
+option('soem',
+       type: 'feature',
+       value: 'auto',
+       description: 'Build ethercatest-soem program')
+
+option('igh',
+       type: 'feature',
+       value: 'auto',
+       description: 'Build ethercatest-igh program')
