@@ -1,7 +1,7 @@
 /* Adapted from SOEM simple_test.c
  *
  * ethercatest-soem: test EtherCAT connection by monitoring I/O
- * Copyright (C) 2021  Fontana Nicola <ntd at entidi.it>
+ * Copyright (C) 2021, 2025  Fontana Nicola <ntd at entidi.it>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,122 +18,39 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include <soem/ethercat.h>
-#include <soem/ethercattype.h>
-#include <ctype.h>
-#include <sys/types.h>
-#include <ifaddrs.h>
-#include <net/if.h>
 #include "ethercatest.h"
-
-#define MUST_BE_ON  IFF_UP
-#define MUST_BE_OFF (IFF_LOOPBACK | IFF_POINTOPOINT)
+#include <soem/soem.h>
+#include <ctype.h>
+#include <inttypes.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 
 typedef struct {
-    ecx_contextt    context;
-    char *          iface;
-    uint8_t         group;
-    int64_t         scan_span;
-    int             wkc;
-    uint64_t        iteration;
-
-    /* Used by the context */
-    uint8_t         map[4096];
-    ecx_portt       port;
-    ec_slavet       slavelist[EC_MAXSLAVE];
-    int             slavecount;
-    ec_groupt       grouplist[EC_MAXGROUP];
-    uint8_t         esibuf[EC_MAXEEPBUF];
-    uint32          esimap[EC_MAXEEPBITMAP];
-    /* I would say this needs to be elist[EC_MAXELIST],
-     * but the source code of SOEM does not agree with me */
-    ec_eringt       elist;
-    ec_idxstackT    idxstack;
-    boolean         ecaterror;
-    int64           DCtime;
-    ec_SMcommtypet  SMcommtype[EC_MAX_MAPT];
-    ec_PDOassignt   PDOassign[EC_MAX_MAPT];
-    ec_PDOdesct     PDOdesc[EC_MAX_MAPT];
-    ec_eepromSMt    eepSM;
-    ec_eepromFMMUt  eepFMMU;
+    ecx_contextt context;
+    char *iface;
+    uint8 group;
+    int wkc;
+    uint64_t iteration;
+    int64_t iteration_time;
+    uint8 map[4096];
 } Fieldbus;
 
 typedef int (*FieldbusCallback)(Fieldbus *);
 
 
-static char *
-get_valid_interface(void)
-{
-    char *iface;
-    struct ifaddrs *addrs;
-
-    iface = NULL;
-    if (getifaddrs(&addrs) != 0) {
-        info("getifaddrs() failed\n");
-    } else if (addrs == NULL) {
-        info("No interfaces found\n");
-    } else {
-        struct ifaddrs *addr;
-        /* Find the first valid interface */
-        for (addr = addrs; addr != NULL; addr = addr->ifa_next) {
-            if ((addr->ifa_flags & MUST_BE_ON) == MUST_BE_ON &&
-                (addr->ifa_flags & MUST_BE_OFF) == 0) {
-                /* A valid interface has been found */
-                break;
-            }
-        }
-        if (addr == NULL) {
-            info("No valid interfaces found\n");
-        } else {
-            iface = strdup(addr->ifa_name);
-        }
-        freeifaddrs(addrs);
-    }
-
-    return iface;
-}
-
 static void
 fieldbus_initialize(Fieldbus *fieldbus)
 {
-    ecx_contextt *context;
+    /* Let's start by 0-filling `fieldbus` to avoid surprises */
+    memset(fieldbus, 0, sizeof(*fieldbus));
 
     fieldbus->iface = NULL;
     fieldbus->group = 0;
-    fieldbus->scan_span = 0;
     fieldbus->wkc = 0;
     fieldbus->iteration = 0;
-    fieldbus->ecaterror = FALSE;
-
-    /* Initialize the ecx_contextt data structure */
-    context = &fieldbus->context;
-
-    /* Let's start by 0-filling it, just in case further fields
-     * will be appended in the future */
-    memset(context, 0, sizeof(*context));
-
-    context->port = &fieldbus->port;
-    context->slavelist = fieldbus->slavelist;
-    context->slavecount = &fieldbus->slavecount;
-    context->maxslave = EC_MAXSLAVE;
-    context->grouplist = fieldbus->grouplist;
-    context->maxgroup = EC_MAXGROUP;
-    context->esibuf = fieldbus->esibuf;
-    context->esimap = fieldbus->esimap;
-    context->esislave = 0;
-    context->elist = &fieldbus->elist;
-    context->idxstack = &fieldbus->idxstack;
-    context->ecaterror = &fieldbus->ecaterror;
-    context->DCtime = &fieldbus->DCtime;
-    context->SMcommtype = fieldbus->SMcommtype;
-    context->PDOassign = fieldbus->PDOassign;
-    context->PDOdesc = fieldbus->PDOdesc;
-    context->eepSM = &fieldbus->eepSM;
-    context->eepFMMU = &fieldbus->eepFMMU;
-    context->FOEhook = NULL;
-    context->EOEhook = NULL;
-    context->manualstatechange = 0;
+    fieldbus->iteration_time = 0;
 }
 
 static void
@@ -146,40 +63,28 @@ fieldbus_finalize(Fieldbus *fieldbus)
 }
 
 static int
-fieldbus_roundtrip(Fieldbus *fieldbus)
+fieldbus_iteration(Fieldbus *fieldbus, FieldbusCallback callback)
 {
-    int64_t start;
+    int64_t start, stop;
     ecx_contextt *context;
 
     context = &fieldbus->context;
 
     start = get_monotonic_time();
-    ecx_send_processdata(context);
+
     fieldbus->wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
-    fieldbus->scan_span = get_monotonic_time() - start;
-
-    return fieldbus->wkc > 0;
-}
-
-static int
-fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
-{
-    int64_t start;
-    int rv;
-    start = get_monotonic_time();
-
-    /* Receive process data */
-    fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
-
     if (callback != NULL && ! callback(fieldbus)) {
         return FALSE;
     }
+    if (ecx_send_processdata(context) <= 0) {
+        return FALSE;
+    }
 
-    /* Send process data */
-    rv = ecx_send_processdata(&fieldbus->context);
+    stop = get_monotonic_time();
 
-    fieldbus->scan_span = get_monotonic_time() - start;
-    return rv > 0;
+    ++fieldbus->iteration;
+    fieldbus->iteration_time = stop - start;
+    return TRUE;
 }
 
 static int
@@ -196,7 +101,7 @@ fieldbus_start(Fieldbus *fieldbus)
     }
 
     context = &fieldbus->context;
-    grp = fieldbus->grouplist + fieldbus->group;
+    grp = context->grouplist + fieldbus->group;
 
     info("Initializing SOEM on '%s'... ", fieldbus->iface);
     if (! ecx_init(context, fieldbus->iface)) {
@@ -206,15 +111,24 @@ fieldbus_start(Fieldbus *fieldbus)
     info("done\n");
 
     info("Finding autoconfig slaves... ");
-    if (ecx_config_init(context, FALSE) <= 0) {
+    if (ecx_config_init(context) <= 0) {
         info("no slaves found\n");
         return FALSE;
     }
-    info("%d slaves found\n", fieldbus->slavecount);
+    info("%d slaves found\n", context->slavecount);
 
     info("Sequential mapping of I/O... ");
     ecx_config_map_group(context, fieldbus->map, fieldbus->group);
-    info("done\n");
+    info("mapped %dO+%dI bytes from %d segments",
+         grp->Obytes, grp->Ibytes, grp->nsegments);
+    if (grp->nsegments > 1) {
+        /* Show how slaves are distributed */
+        for (i = 0; i < grp->nsegments; ++i) {
+            info("%s%d", i == 0 ? " (" : "+", grp->IOsegment[i]);
+        }
+        info(" slaves)");
+    }
+    info("\n");
 
     info("Configuring distributed clock... ");
     ecx_configdc(context);
@@ -222,24 +136,21 @@ fieldbus_start(Fieldbus *fieldbus)
 
     info("Waiting for all slaves in safe operational... ");
     ecx_statecheck(context, 0, EC_STATE_SAFE_OP, EC_TIMEOUTSTATE * 4);
-    info("found %d segments", grp->nsegments);
-    for (i = 0; i < grp->nsegments; ++i) {
-        info("%s%d slaves", i == 0 ? " (" : ", ", grp->IOsegment[i]);
-    }
-    info(grp->nsegments > 0 ? ")\n" : "\n");
+    info("done\n");
 
-    /* Send one valid process data to make outputs in slaves happy */
-    ecx_send_processdata(&fieldbus->context);
+    info("Initial process data transmission... ");
+    ecx_send_processdata(context);
+    info("done\n");
 
     info("Setting operational state..");
     /* Act on slave 0 (a virtual slave used for broadcasting) */
-    slave = fieldbus->slavelist;
+    slave = context->slavelist;
     slave->state = EC_STATE_OPERATIONAL;
     ecx_writestate(context, 0);
     /* Poll the result ten times before giving up */
     for (i = 0; i < 10; ++i) {
         info(".");
-        fieldbus_scan(fieldbus, NULL);
+        fieldbus_iteration(fieldbus, NULL);
         ecx_statecheck(context, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE / 10);
         if (slave->state == EC_STATE_OPERATIONAL) {
             info(" all slaves are now operational\n");
@@ -247,10 +158,10 @@ fieldbus_start(Fieldbus *fieldbus)
         }
     }
 
-    info(" failed");
+    info(" failed,");
     ecx_readstate(context);
-    for (i = 1; i <= fieldbus->slavecount; ++i) {
-        slave = fieldbus->slavelist + i;
+    for (i = 1; i <= context->slavecount; ++i) {
+        slave = context->slavelist + i;
         if (slave->state != EC_STATE_OPERATIONAL) {
             info(" slave %d is 0x%04X (AL-status=0x%04X %s)",
                  i, slave->state, slave->ALstatuscode,
@@ -270,7 +181,7 @@ fieldbus_stop(Fieldbus *fieldbus)
 
     context = &fieldbus->context;
     /* Act on slave 0 (a virtual slave used for broadcasting) */
-    slave = fieldbus->slavelist;
+    slave = context->slavelist;
 
     info("Requesting init state on all slaves... ");
     slave->state = EC_STATE_INIT;
@@ -285,16 +196,18 @@ fieldbus_stop(Fieldbus *fieldbus)
 static int
 fieldbus_dump(Fieldbus *fieldbus)
 {
+    ecx_contextt *context;
     ec_groupt *grp;
-    int n, expected_wkc;
+    uint32 n;
+    int expected_wkc;
 
-    grp = fieldbus->grouplist + fieldbus->group;
-    /* XXX: no idea why the expected WKC should be this...
-     *      I would have used `fieldbus->slavecount` instead */
+    context = &fieldbus->context;
+    grp = context->grouplist + fieldbus->group;
+
     expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
     info("Iteration %" PRIu64 ":  %" PRId64 " usec  WKC %d",
-         fieldbus->iteration, fieldbus->scan_span, fieldbus->wkc);
-    if (fieldbus->wkc < expected_wkc) {
+         fieldbus->iteration, fieldbus->iteration_time, fieldbus->wkc);
+    if (fieldbus->wkc != expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
         return FALSE;
     }
@@ -307,7 +220,7 @@ fieldbus_dump(Fieldbus *fieldbus)
     for (n = 0; n < grp->Ibytes; ++n) {
         info(" %02X", grp->inputs[n]);
     }
-    info("  T: %" PRId64 "   \r", fieldbus->DCtime);
+    info("  T: %lld\r", (long long) context->DCtime);
     return TRUE;
 }
 
@@ -323,7 +236,7 @@ fieldbus_recover(Fieldbus *fieldbus)
     grp = context->grouplist + fieldbus->group;
     grp->docheckstate = FALSE;
     ecx_readstate(context);
-    for (i = 1; i <= fieldbus->slavecount; ++i) {
+    for (i = 1; i <= context->slavecount; ++i) {
         slave = context->slavelist + i;
         if (slave->group != fieldbus->group) {
             /* This slave is part of another group: do nothing */
@@ -333,16 +246,16 @@ fieldbus_recover(Fieldbus *fieldbus)
                 info("* Slave %d is in SAFE_OP+ERROR, attempting ACK\n", i);
                 slave->state = EC_STATE_SAFE_OP + EC_STATE_ACK;
                 ecx_writestate(context, i);
-            } else if(slave->state == EC_STATE_SAFE_OP) {
+            } else if (slave->state == EC_STATE_SAFE_OP) {
                 info("* Slave %d is in SAFE_OP, change to OPERATIONAL\n", i);
                 slave->state = EC_STATE_OPERATIONAL;
                 ecx_writestate(context, i);
-            } else if(slave->state > EC_STATE_NONE) {
+            } else if (slave->state > EC_STATE_NONE) {
                 if (ecx_reconfig_slave(context, i, EC_TIMEOUTRET)) {
                     slave->islost = FALSE;
                     info("* Slave %d reconfigured\n", i);
                 }
-            } else if(! slave->islost) {
+            } else if (! slave->islost) {
                 ecx_statecheck(context, i, EC_STATE_OPERATIONAL, EC_TIMEOUTRET);
                 if (slave->state == EC_STATE_NONE) {
                     slave->islost = TRUE;
@@ -350,7 +263,7 @@ fieldbus_recover(Fieldbus *fieldbus)
                 }
             }
         } else if (slave->islost) {
-            if(slave->state != EC_STATE_NONE) {
+            if (slave->state != EC_STATE_NONE) {
                 slave->islost = FALSE;
                 info("* Slave %d found\n", i);
             } else if (ecx_recover_slave(context, i, EC_TIMEOUTRET)) {
@@ -385,6 +298,26 @@ cycle(Fieldbus *fieldbus)
      * in the first 8 digital outputs */
     fieldbus->map[0] = fieldbus->iteration / 20;
     return TRUE;
+}
+
+static char *
+get_valid_interface(void)
+{
+    ec_adaptert *adapters = ec_find_adapters();
+    if (adapters == NULL) {
+        return NULL;
+    }
+
+    char *iface = NULL;
+
+    /* Skip the first adapter (most likely the loopback interface) */
+    ec_adaptert *adapter = adapters->next;
+    if (adapter != NULL) {
+        iface = strdup(adapter->name);
+    }
+    ec_free_adapters(adapter);
+
+    return iface;
 }
 
 static void
@@ -429,44 +362,44 @@ main(int argc, char *argv[])
     /* On invalid arguments, `fieldbus.iface` will be empty
      * so `fieldbus_start` will fail */
     if (fieldbus_start(&fieldbus)) {
-        int64_t min_span = 0;
-        int64_t max_span = 0;
+        int64_t min_time = 0;
+        int64_t max_time = 0;
         if (period == 0) {
             while (++fieldbus.iteration < 50000) {
-                if (! fieldbus_roundtrip(&fieldbus) ||
+                if (! fieldbus_iteration(&fieldbus, NULL) ||
                     ! fieldbus_dump(&fieldbus)) {
                     fieldbus_recover(&fieldbus);
-                } else if (max_span == 0) {
-                    min_span = max_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span < min_span) {
-                    min_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span > max_span) {
-                    max_span = fieldbus.scan_span;
+                } else if (max_time == 0) {
+                    min_time = max_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time < min_time) {
+                    min_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time > max_time) {
+                    max_time = fieldbus.iteration_time;
                 }
             }
             info("\nRoundtrip time (usec): min %" PRId64 "  max %" PRId64 "\n",
-                 min_span, max_span);
+                 min_time, max_time);
         } else {
             while (++fieldbus.iteration < 10000) {
-                if (! fieldbus_scan(&fieldbus, cycle) ||
+                if (! fieldbus_iteration(&fieldbus, cycle) ||
                     ! fieldbus_dump(&fieldbus)) {
                     fieldbus_recover(&fieldbus);
-                } else if (max_span == 0) {
-                    min_span = max_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span < min_span) {
-                    min_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span > max_span) {
-                    max_span = fieldbus.scan_span;
+                } else if (max_time == 0) {
+                    min_time = max_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time < min_time) {
+                    min_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time > max_time) {
+                    max_time = fieldbus.iteration_time;
                 }
                 /* Wait for the next scan */
-                if (fieldbus.scan_span > period) {
-                    info("\nScan too low (%" PRId64 " usec)\n", fieldbus.scan_span);
+                if (fieldbus.iteration_time > period) {
+                    info("\nScan too low (%" PRId64 " usec)\n", fieldbus.iteration_time);
                 } else {
-                    usleep(period - fieldbus.scan_span);
+                    usleep(period - fieldbus.iteration_time);
                 }
             }
-            info("\nTime span of scans (usec): min %" PRId64 "  max %" PRId64 "\n",
-                 min_span, max_span);
+            info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
+                 min_time, max_time);
         }
         fieldbus_stop(&fieldbus);
     }
