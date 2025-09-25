@@ -1,6 +1,6 @@
 /* Code shared by both ethercatest programs.
  *
- * Copyright (C) 2021  Fontana Nicola <ntd at entidi.it>
+ * Copyright (C) 2021, 2025  Fontana Nicola <ntd at entidi.it>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@
  */
 
 #include "ethercatest.h"
+#include <time.h>
 
 
 int64_t
