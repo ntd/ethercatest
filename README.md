@@ -20,7 +20,7 @@ The two projects are really different.
 
 SOEM is basically a userspace library. It is really easy use: you
 just need to link your application to it (statically, by default)
-and you are ready to go. Thr program tries to guess the Ethernet
+and you are ready to go. The program tries to guess the Ethernet
 device to use but you can override its logic by passing it as
 first argument. To be able to access the raw Ethernet device, the
 SOEM program must be run as root.
