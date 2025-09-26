@@ -29,7 +29,7 @@
 
 typedef struct {
     ecx_contextt context;
-    char *iface;
+    const char *iface;
     uint8 group;
     int wkc;
     uint64_t iteration;
@@ -51,15 +51,6 @@ fieldbus_initialize(Fieldbus *fieldbus)
     fieldbus->wkc = 0;
     fieldbus->iteration = 0;
     fieldbus->iteration_time = 0;
-}
-
-static void
-fieldbus_finalize(Fieldbus *fieldbus)
-{
-    if (fieldbus->iface != NULL) {
-        free(fieldbus->iface);
-        fieldbus->iface = NULL;
-    }
 }
 
 static int
@@ -300,26 +291,6 @@ cycle(Fieldbus *fieldbus)
     return TRUE;
 }
 
-static char *
-get_valid_interface(void)
-{
-    ec_adaptert *adapters = ec_find_adapters();
-    if (adapters == NULL) {
-        return NULL;
-    }
-
-    char *iface = NULL;
-
-    /* Skip the first adapter (most likely the loopback interface) */
-    ec_adaptert *adapter = adapters->next;
-    if (adapter != NULL) {
-        iface = strdup(adapter->name);
-    }
-    ec_free_adapters(adapter);
-
-    return iface;
-}
-
 static void
 usage(void)
 {
@@ -339,20 +310,20 @@ main(int argc, char *argv[])
     /* Parse arguments */
     period = 5000;
     if (argc == 1) {
-        fieldbus.iface = get_valid_interface();
+        fieldbus.iface = get_default_interface();
     } else if (argc == 3) {
-        fieldbus.iface = strdup(argv[1]);
+        fieldbus.iface = argv[1];
         period = atoi(argv[2]);
     } else if (argc == 2) {
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             usage();
         } else if (all_digits(argv[1])) {
             /* There is one number argument only */
-            fieldbus.iface = get_valid_interface();
+            fieldbus.iface = get_default_interface();
             period = atoi(argv[1]);
         } else {
             /* There is one string argument only */
-            fieldbus.iface = strdup(argv[1]);
+            fieldbus.iface = argv[1];
         }
     } else {
         info("Invalid arguments.\n");
@@ -404,6 +375,5 @@ main(int argc, char *argv[])
         fieldbus_stop(&fieldbus);
     }
 
-    fieldbus_finalize(&fieldbus);
     return 0;
 }

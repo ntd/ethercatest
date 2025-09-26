@@ -25,4 +25,5 @@
 #define TRUE  1
 
 
-int64_t get_monotonic_time (void);
+int64_t         get_monotonic_time          (void);
+const char *    get_default_interface       (void);
