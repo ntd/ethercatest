@@ -26,4 +26,6 @@
 
 
 int64_t         get_monotonic_time          (void);
+void            wait_next_iteration         (int64_t iteration_time,
+                                             int64_t period);
 const char *    get_default_interface       (void);

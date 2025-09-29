@@ -19,6 +19,7 @@
 
 #include "ethercatest.h"
 #include <ifaddrs.h>
+#include <inttypes.h>
 #include <net/if.h>
 #include <alloca.h>
 #include <string.h>
@@ -33,6 +34,17 @@ get_monotonic_time(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (((int64_t) ts.tv_sec) * 1000000) + (ts.tv_nsec / 1000);
+}
+
+void
+wait_next_iteration(int64_t iteration_time, int64_t period)
+{
+    if (period == 0) {
+    } else if (iteration_time > period) {
+        info("\n Iteration time overflow (%" PRId64 " usec)\n", iteration_time);
+    } else {
+        usleep(period - iteration_time);
+    }
 }
 
 static int
