@@ -401,9 +401,9 @@ fieldbus_dump(Fieldbus *fieldbus)
 }
 
 static int
-cycle(Fieldbus *fieldbus)
+digital_counter(Fieldbus *fieldbus)
 {
-    /* Show a digital counter that updates every 0.1 s (5000 us x 20)
+    /* Show a digital counter that updates every 20 iterations
      * in the first 8 digital outputs */
     fieldbus->map[0] = fieldbus->iteration / 20;
     return TRUE;
@@ -443,43 +443,23 @@ main(int argc, char *argv[])
     if (fieldbus_start(&fieldbus)) {
         int64_t min_time = 0;
         int64_t max_time = 0;
-        if (period == 0) {
-            while (++fieldbus.iteration < 50000) {
-                if (! fieldbus_iteration(&fieldbus, NULL) ||
-                    ! fieldbus_dump(&fieldbus)) {
-                    info("Iteration failed!\n");
-                } else if (max_time == 0) {
-                    min_time = max_time = fieldbus.iteration_time;
-                } else if (fieldbus.iteration_time < min_time) {
-                    min_time = fieldbus.iteration_time;
-                } else if (fieldbus.iteration_time > max_time) {
-                    max_time = fieldbus.iteration_time;
-                }
+        uint64_t iterations = 100000 / (period / 100 + 1);
+        FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
+        while (++fieldbus.iteration < iterations) {
+            if (! fieldbus_iteration(&fieldbus, cycle) ||
+                ! fieldbus_dump(&fieldbus)) {
+                info("Iteration failed!\n");
+            } else if (max_time == 0) {
+                min_time = max_time = fieldbus.iteration_time;
+            } else if (fieldbus.iteration_time < min_time) {
+                min_time = fieldbus.iteration_time;
+            } else if (fieldbus.iteration_time > max_time) {
+                max_time = fieldbus.iteration_time;
             }
-            info("\nRoundtrip time (usec): min %" PRId64 "  max %" PRId64 "\n",
-                 min_time, max_time);
-        } else {
-            while (++fieldbus.iteration < 10000) {
-                if (! fieldbus_iteration(&fieldbus, cycle) ||
-                    ! fieldbus_dump(&fieldbus)) {
-                    info("Iteration failed!\n");
-                } else if (max_time == 0) {
-                    min_time = max_time = fieldbus.iteration_time;
-                } else if (fieldbus.iteration_time < min_time) {
-                    min_time = fieldbus.iteration_time;
-                } else if (fieldbus.iteration_time > max_time) {
-                    max_time = fieldbus.iteration_time;
-                }
-                /* Wait for the next scan */
-                if (fieldbus.iteration_time > period) {
-                    info("\nScan too low (%" PRId64 " usec)\n", fieldbus.iteration_time);
-                } else {
-                    usleep(period - fieldbus.iteration_time);
-                }
-            }
-            info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
-                 min_time, max_time);
+            wait_next_iteration(fieldbus.iteration_time, period);
         }
+        info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
+             min_time, max_time);
         fieldbus_stop(&fieldbus);
     }
 
