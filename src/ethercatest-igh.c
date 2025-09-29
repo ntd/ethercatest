@@ -26,13 +26,13 @@
 
 
 typedef struct {
-    ec_master_t *           master;
-    ec_master_info_t        master_info;
-    ec_domain_t *           domain1;
-    uint8_t *               map;
-    ec_domain_state_t       domain1_state;
-    int64_t                 scan_span;
-    uint64_t                iteration;
+    ec_master_t *master;
+    ec_master_info_t master_info;
+    ec_domain_t *domain;
+    ec_domain_state_t domain1_state;
+    int64_t iteration_time;
+    uint64_t iteration;
+    uint8_t *map;
 } Fieldbus;
 
 typedef struct TraverserData_ TraverserData;
@@ -55,13 +55,6 @@ struct TraverserData_ {
 };
 
 typedef struct {
-    int nslave;
-    int nsync;
-    int npdo;
-    int nentry;
-} TraverseMapping;
-
-typedef struct {
     ec_direction_t  dir;
     const char *    prefix;
     unsigned        channels;
@@ -74,62 +67,48 @@ typedef int (*FieldbusCallback)(Fieldbus *);
 static void
 fieldbus_initialize(Fieldbus *fieldbus)
 {
+    /* Let's start by 0-filling `fieldbus` to avoid surprises */
+    memset(fieldbus, 0, sizeof(*fieldbus));
+
     fieldbus->master = NULL;
-    fieldbus->domain1 = NULL;
+    fieldbus->domain = NULL;
     fieldbus->map = NULL;
-    fieldbus->scan_span = 0;
     fieldbus->iteration = 0;
+    fieldbus->iteration_time = 0;
+}
+
+static int
+fieldbus_send(Fieldbus *fieldbus)
+{
+    ecrt_domain_queue(fieldbus->domain);
+    ecrt_master_send(fieldbus->master);
 }
 
 static void
-fieldbus_finalize(Fieldbus *fieldbus)
+fieldbus_receive(Fieldbus *fieldbus)
 {
-    /* Nothing to do */
+    ecrt_master_receive(fieldbus->master);
+    ecrt_domain_process(fieldbus->domain);
+    ecrt_domain_state(fieldbus->domain, &fieldbus->domain1_state);
 }
 
 static int
-fieldbus_roundtrip(Fieldbus *fieldbus)
+fieldbus_iteration(Fieldbus *fieldbus, FieldbusCallback callback)
 {
-    int64_t start = get_monotonic_time();
+    int64_t start, stop;
 
-    /* Send process data */
-    ecrt_domain_queue(fieldbus->domain1);
-    ecrt_master_send(fieldbus->master);
-
-    /* Receive process data */
-    do {
-        usleep(5);
-        ecrt_master_receive(fieldbus->master);
-        ecrt_domain_process(fieldbus->domain1);
-        ecrt_domain_state(fieldbus->domain1, &fieldbus->domain1_state);
-        fieldbus->scan_span = get_monotonic_time() - start;
-    } while (fieldbus->scan_span < 1000000 && fieldbus->domain1_state.wc_state != EC_WC_COMPLETE);
-
-    return fieldbus->domain1_state.wc_state == EC_WC_COMPLETE;
-}
-
-static int
-fieldbus_scan(Fieldbus *fieldbus, FieldbusCallback callback)
-{
-    int64_t start = get_monotonic_time();
-
-    /* Skip the receiving on the first iteration (nothing to receive) */
-    if (fieldbus->iteration > 1) {
-        /* Receive process data */
-        ecrt_master_receive(fieldbus->master);
-        ecrt_domain_process(fieldbus->domain1);
-        ecrt_domain_state(fieldbus->domain1, &fieldbus->domain1_state);
-    }
+    start = get_monotonic_time();
+    fieldbus_receive(fieldbus);
 
     if (callback != NULL && ! callback(fieldbus)) {
         return FALSE;
     }
 
-    /* Send process data */
-    ecrt_domain_queue(fieldbus->domain1);
-    ecrt_master_send(fieldbus->master);
+    fieldbus_send(fieldbus);
+    stop = get_monotonic_time();
 
-    fieldbus->scan_span = get_monotonic_time() - start;
+    ++fieldbus->iteration;
+    fieldbus->iteration_time = stop - start;
     return fieldbus->domain1_state.wc_state != EC_WC_INCOMPLETE;
 }
 
@@ -224,51 +203,6 @@ traverser_get_slave_config(TraverserData *data)
     return sc;
 }
 
-static int
-traverser_mapper(TraverserData *data)
-{
-    TraverseMapping *mapping = data->context;
-
-    if (data->nslave != mapping->nslave) {
-        /* Mapping new slave */
-        mapping->nslave = data->nslave;
-        mapping->nsync  = -1;
-    }
-    if (data->nsync != mapping->nsync) {
-        /* Mapping new sync manager */
-        mapping->nsync = data->nsync;
-        mapping->npdo  = -1;
-    }
-    if (data->npdo != mapping->npdo) {
-        /* Mapping new PDO */
-        ec_slave_config_t *sc = traverser_get_slave_config(data);
-        mapping->npdo = data->npdo;
-        if (data->npdo == 0) {
-            ecrt_slave_config_pdo_assign_clear(sc, data->nsync);
-        }
-        ecrt_slave_config_pdo_assign_add(sc, data->nsync, data->npdo);
-        ecrt_slave_config_pdo_mapping_clear(sc, data->npdo);
-        ecrt_slave_config_pdo_mapping_add(sc, data->npdo,
-                                          data->entry.index,
-                                          data->entry.subindex,
-                                          data->entry.bit_length);
-    }
-
-    return TRUE;
-}
-
-static int
-fieldbus_automapping(Fieldbus *fieldbus)
-{
-    TraverseMapping mapping = {
-        .nslave = -1,
-        .nsync  = -1,
-        .npdo   = -1,
-        .nentry = -1,
-    };
-    return fieldbus_traverse_pdo_entries(fieldbus, traverser_mapper, &mapping);
-}
-
 static void
 dump_configuration(TraverseConfiguration *configuration)
 {
@@ -313,7 +247,7 @@ traverser_configurer(TraverserData *data)
 
     sc = traverser_get_slave_config(data);
     bytepos = ecrt_slave_config_reg_pdo_entry(sc, data->entry.index, data->entry.subindex,
-                                              data->fieldbus->domain1, &bitpos);
+                                              data->fieldbus->domain, &bitpos);
     if (bytepos < 0) {
         info("failed to register entry %d on PDO %d on sync manager %d on slave %d\n",
              data->nentry, data->npdo, data->nsync, data->nslave);
@@ -360,7 +294,7 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
 static int
 fieldbus_start(Fieldbus *fieldbus)
 {
-    ec_master_state_t master;
+    ec_master_state_t state;
     int n;
 
     if (fieldbus->master != NULL) {
@@ -379,23 +313,16 @@ fieldbus_start(Fieldbus *fieldbus)
     info("done\n");
 
     info("Creating domain... ");
-    fieldbus->domain1 = ecrt_master_create_domain(fieldbus->master);
-    if (fieldbus->domain1 == NULL) {
+    fieldbus->domain = ecrt_master_create_domain(fieldbus->master);
+    if (fieldbus->domain == NULL) {
         info("failed\n");
         return FALSE;
     }
     info("done\n");
 
-    /* This is not strictly needed (the slaves should have been
-     * already mapped in this way) but... just in case */
-    info("Automapping slaves... ");
-    if (! fieldbus_automapping(fieldbus)) {
-        return FALSE;
-    }
-    info("%d slaves mapped\n", fieldbus->master_info.slave_count);
-
     info("Autoconfiguring slaves... ");
     if (! fieldbus_autoconfigure(fieldbus)) {
+        info("failed\n");
         return FALSE;
     }
     info("\n");
@@ -408,24 +335,28 @@ fieldbus_start(Fieldbus *fieldbus)
     info("done\n");
 
     info("Get domain process data... ");
-    fieldbus->map = ecrt_domain_data(fieldbus->domain1);
+    fieldbus->map = ecrt_domain_data(fieldbus->domain);
     if (fieldbus->map == NULL) {
         info("failed\n");
         return FALSE;
     }
     info("done\n");
 
+    info("Initial process data transmission... ");
+    fieldbus_send(fieldbus);
+    info("done\n");
+
     info("Waiting all slaves in OP state... ");
-    for (n = 0; n < 5000; ++n) {
-        ecrt_master_send(fieldbus->master);
-        ecrt_master_receive(fieldbus->master);
-        ecrt_master_state(fieldbus->master, &master);
-        if (master.al_states == EC_AL_STATE_OP) {
+    for (n = 0; n < 10000; ++n) {
+        ecrt_master_state(fieldbus->master, &state);
+        if (state.al_states == EC_AL_STATE_OP) {
             break;
         }
-        usleep(100);
+        usleep(500);
+        fieldbus_receive(fieldbus);
+        fieldbus_send(fieldbus);
     }
-    if (master.al_states != EC_AL_STATE_OP) {
+    if (state.al_states != EC_AL_STATE_OP) {
         const char *prefix = "";
         ec_slave_info_t slave_info;
         for (n = 0; n < fieldbus->master_info.slave_count; ++n) {
@@ -436,13 +367,6 @@ fieldbus_start(Fieldbus *fieldbus)
             }
         }
         info("\n");
-        return FALSE;
-    }
-    info("done\n");
-
-    info("Do a roundtrip to fill the process data... ");
-    if (! fieldbus_roundtrip(fieldbus)) {
-        info("failed\n");
         return FALSE;
     }
     info("done\n");
@@ -466,20 +390,14 @@ fieldbus_dump(Fieldbus *fieldbus)
     int i;
 
     info("Iteration %" PRIu64 ":  %" PRId64 " usec WKC %d",
-         fieldbus->iteration, fieldbus->scan_span, wkc);
+         fieldbus->iteration, fieldbus->iteration_time, wkc);
 
-    for (i = 0; i < ecrt_domain_size(fieldbus->domain1); ++i) {
+    for (i = 0; i < ecrt_domain_size(fieldbus->domain); ++i) {
         info(" %02X", fieldbus->map[i]);
     }
     info("   \r");
 
     return TRUE;
-}
-
-static void
-fieldbus_recover(Fieldbus *fieldbus)
-{
-    /* TODO */
 }
 
 static int
@@ -494,7 +412,7 @@ cycle(Fieldbus *fieldbus)
 static void
 usage(void)
 {
-    info("Usage: ethercatest-itg [PERIOD]\n"
+    info("Usage: ethercatest-igh [PERIOD]\n"
          "  [PERIOD] Scantime in us (0 for roundtrip performances)\n");
 }
 
@@ -503,6 +421,8 @@ main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
     unsigned long period;
+
+    setbuf(stdout, NULL);
 
     fieldbus_initialize(&fieldbus);
 
@@ -521,48 +441,47 @@ main(int argc, char *argv[])
     }
 
     if (fieldbus_start(&fieldbus)) {
-        int64_t min_span = 0;
-        int64_t max_span = 0;
+        int64_t min_time = 0;
+        int64_t max_time = 0;
         if (period == 0) {
             while (++fieldbus.iteration < 50000) {
-                if (! fieldbus_roundtrip(&fieldbus) ||
+                if (! fieldbus_iteration(&fieldbus, NULL) ||
                     ! fieldbus_dump(&fieldbus)) {
-                    fieldbus_recover(&fieldbus);
-                } else if (max_span == 0) {
-                    min_span = max_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span < min_span) {
-                    min_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span > max_span) {
-                    max_span = fieldbus.scan_span;
+                    info("Iteration failed!\n");
+                } else if (max_time == 0) {
+                    min_time = max_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time < min_time) {
+                    min_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time > max_time) {
+                    max_time = fieldbus.iteration_time;
                 }
             }
             info("\nRoundtrip time (usec): min %" PRId64 "  max %" PRId64 "\n",
-                 min_span, max_span);
+                 min_time, max_time);
         } else {
             while (++fieldbus.iteration < 10000) {
-                if (! fieldbus_scan(&fieldbus, cycle) ||
+                if (! fieldbus_iteration(&fieldbus, cycle) ||
                     ! fieldbus_dump(&fieldbus)) {
-                    fieldbus_recover(&fieldbus);
-                } else if (max_span == 0) {
-                    min_span = max_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span < min_span) {
-                    min_span = fieldbus.scan_span;
-                } else if (fieldbus.scan_span > max_span) {
-                    max_span = fieldbus.scan_span;
+                    info("Iteration failed!\n");
+                } else if (max_time == 0) {
+                    min_time = max_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time < min_time) {
+                    min_time = fieldbus.iteration_time;
+                } else if (fieldbus.iteration_time > max_time) {
+                    max_time = fieldbus.iteration_time;
                 }
                 /* Wait for the next scan */
-                if (fieldbus.scan_span > period) {
-                    info("\nScan too low (%" PRId64 " usec)\n", fieldbus.scan_span);
+                if (fieldbus.iteration_time > period) {
+                    info("\nScan too low (%" PRId64 " usec)\n", fieldbus.iteration_time);
                 } else {
-                    usleep(period - fieldbus.scan_span);
+                    usleep(period - fieldbus.iteration_time);
                 }
             }
-            info("\nTime span of scans (usec): min %" PRId64 "  max %" PRId64 "\n",
-                 min_span, max_span);
+            info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
+                 min_time, max_time);
         }
         fieldbus_stop(&fieldbus);
     }
 
-    fieldbus_finalize(&fieldbus);
     return 0;
 }
