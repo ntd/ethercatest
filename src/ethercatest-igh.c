@@ -419,24 +419,28 @@ int
 main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
+    const char *arg;
     unsigned long period;
+    int n, silent;
 
     setbuf(stdout, NULL);
 
     fieldbus_initialize(&fieldbus);
 
     /* Parse arguments */
-    if (argc == 1) {
-        period = 5000;
-    } else if (argc > 2) {
-        info("Too many arguments.\n");
-        usage();
-        return 1;
-    } else if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-        usage();
-        return 0;
-    } else {
-        period = atoi(argv[1]);
+    period = 5000;
+    silent = 0;
+
+    for (n = 1; n < argc; ++n) {
+        arg = argv[n];
+        if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
+            usage();
+            return 0;
+        } else if (strcmp(arg, "-q") == 0 || strcmp(arg, "--quiet") == 0) {
+            silent = 1;
+        } else {
+            period = atoi(arg);
+        }
     }
 
     if (! fieldbus_start(&fieldbus)) {
@@ -451,9 +455,8 @@ main(int argc, char *argv[])
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
     while (++fieldbus.iteration < iterations) {
         if (! fieldbus_iterate(&fieldbus, cycle) ||
-            ! fieldbus_dump(&fieldbus)) {
+            ! silent && ! fieldbus_dump(&fieldbus)) {
             ++errors;
-            info("Iteration failed!\n");
         } else if (max_time == 0) {
             min_time = max_time = fieldbus.iteration_time;
         } else if (fieldbus.iteration_time < min_time) {
