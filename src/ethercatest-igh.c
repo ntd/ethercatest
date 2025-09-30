@@ -93,7 +93,7 @@ fieldbus_receive(Fieldbus *fieldbus)
 }
 
 static int
-fieldbus_iteration(Fieldbus *fieldbus, FieldbusCallback callback)
+fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
 {
     int64_t start, stop;
 
@@ -446,7 +446,7 @@ main(int argc, char *argv[])
         uint64_t iterations = 100000 / (period / 100 + 1);
         FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
         while (++fieldbus.iteration < iterations) {
-            if (! fieldbus_iteration(&fieldbus, cycle) ||
+            if (! fieldbus_iterate(&fieldbus, cycle) ||
                 ! fieldbus_dump(&fieldbus)) {
                 info("Iteration failed!\n");
             } else if (max_time == 0) {
