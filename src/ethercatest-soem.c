@@ -36,7 +36,7 @@ typedef struct {
     uint8 map[4096];
 } Fieldbus;
 
-typedef int (*FieldbusCallback)(Fieldbus *);
+typedef void (*FieldbusCallback)(Fieldbus *);
 
 
 static void
@@ -57,24 +57,23 @@ fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
 {
     int64_t start, stop;
     ecx_contextt *context;
+    int status;
 
     context = &fieldbus->context;
 
     start = get_monotonic_time();
 
     fieldbus->wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
-    if (callback != NULL && ! callback(fieldbus)) {
-        return FALSE;
+    if (callback != NULL) {
+        callback(fieldbus);
     }
-    if (ecx_send_processdata(context) <= 0) {
-        return FALSE;
-    }
+    status = ecx_send_processdata(context);
 
     stop = get_monotonic_time();
 
     ++fieldbus->iteration;
     fieldbus->iteration_time = stop - start;
-    return TRUE;
+    return status > 0;
 }
 
 static int
@@ -281,13 +280,12 @@ all_digits(const char *string)
     return ch != string;
 }
 
-static int
+static void
 digital_counter(Fieldbus *fieldbus)
 {
     /* Show a digital counter that updates every 20 iterations
      * in the first 8 digital outputs */
     fieldbus->map[0] = fieldbus->iteration / 20;
-    return TRUE;
 }
 
 static void
@@ -340,11 +338,13 @@ main(int argc, char *argv[])
     int64_t min_time = 0;
     int64_t max_time = 0;
     int64_t total_time = 0;
+    int errors = 0;
     uint64_t iterations = 100000 / (period / 100 + 3);
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
     while (++fieldbus.iteration < iterations) {
         if (! fieldbus_iterate(&fieldbus, cycle) ||
             ! fieldbus_dump(&fieldbus)) {
+            ++errors;
             fieldbus_recover(&fieldbus);
         } else if (max_time == 0) {
             min_time = max_time = fieldbus.iteration_time;
@@ -356,8 +356,8 @@ main(int argc, char *argv[])
         total_time += fieldbus.iteration_time;
         wait_next_iteration(fieldbus.iteration_time, period);
     }
-    info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "  total %" PRId64 "\n",
-         min_time, max_time, total_time);
+    info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "  total %" PRId64 "  errors %d\n",
+         min_time, max_time, total_time, errors);
     fieldbus_stop(&fieldbus);
 
     return 0;
