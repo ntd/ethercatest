@@ -446,6 +446,7 @@ main(int argc, char *argv[])
 
     int64_t min_time = 0;
     int64_t max_time = 0;
+    int64_t total_time = 0;
     uint64_t iterations = 100000 / (period / 100 + 2);
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
     while (++fieldbus.iteration < iterations) {
@@ -459,10 +460,11 @@ main(int argc, char *argv[])
         } else if (fieldbus.iteration_time > max_time) {
             max_time = fieldbus.iteration_time;
         }
+        total_time += fieldbus.iteration_time;
         wait_next_iteration(fieldbus.iteration_time, period);
     }
-    info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
-         min_time, max_time);
+    info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "  total %" PRId64 "\n",
+         min_time, max_time, total_time);
     fieldbus_stop(&fieldbus);
 
     return 0;

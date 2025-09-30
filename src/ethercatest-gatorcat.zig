@@ -217,6 +217,7 @@ pub fn main() !void {
 
     var min_time: i64 = 0;
     var max_time: i64 = 0;
+    var total_time: i64 = 0;
     const iterations: u64 = 100_000 / (fieldbus.period / 100 + 3);
 
     while (fieldbus.iteration < iterations) {
@@ -233,8 +234,11 @@ pub fn main() !void {
             max_time = time;
         }
 
+        total_time += time;
         c.wait_next_iteration(time, fieldbus.period);
     }
 
-    info("\nIteration time (usec): min {d}  max {d}\n", .{ min_time, max_time });
+    info("\nIteration time (usec): min {d}  max {d}  total {d}\n", .{
+        min_time, max_time, total_time,
+    });
 }
