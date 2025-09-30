@@ -29,7 +29,7 @@ typedef struct {
     ec_master_t *master;
     ec_master_info_t master_info;
     ec_domain_t *domain;
-    ec_domain_state_t domain1_state;
+    ec_domain_state_t domain_state;
     int64_t iteration_time;
     uint64_t iteration;
     uint8_t *map;
@@ -80,36 +80,61 @@ fieldbus_initialize(Fieldbus *fieldbus)
 static int
 fieldbus_send(Fieldbus *fieldbus)
 {
-    ecrt_domain_queue(fieldbus->domain);
-    ecrt_master_send(fieldbus->master);
+    int status;
+
+    status = ecrt_domain_queue(fieldbus->domain);
+    if (status < 0) {
+        return status;
+    }
+
+    return ecrt_master_send(fieldbus->master);
 }
 
-static void
+static int
 fieldbus_receive(Fieldbus *fieldbus)
 {
-    ecrt_master_receive(fieldbus->master);
-    ecrt_domain_process(fieldbus->domain);
-    ecrt_domain_state(fieldbus->domain, &fieldbus->domain1_state);
+    int status;
+
+    status = ecrt_master_receive(fieldbus->master);
+    if (status < 0) {
+        return status;
+    }
+
+    status = ecrt_domain_process(fieldbus->domain);
+    if (status < 0) {
+        return status;
+    }
+
+    return ecrt_domain_state(fieldbus->domain, &fieldbus->domain_state);
 }
 
 static int
 fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
 {
     int64_t start, stop;
+    int status;
 
     start = get_monotonic_time();
 
-    fieldbus_receive(fieldbus);
+    status = fieldbus_receive(fieldbus);
+    if (status < 0) {
+        return status;
+    }
+
     if (callback != NULL) {
         callback(fieldbus);
     }
-    fieldbus_send(fieldbus);
+
+    status = fieldbus_send(fieldbus);
+    if (status < 0) {
+        return status;
+    }
 
     stop = get_monotonic_time();
 
     ++fieldbus->iteration;
     fieldbus->iteration_time = stop - start;
-    return fieldbus->domain1_state.wc_state != EC_WC_INCOMPLETE;
+    return 0;
 }
 
 static int
@@ -342,19 +367,15 @@ fieldbus_start(Fieldbus *fieldbus)
     }
     info("done\n");
 
-    info("Initial process data transmission... ");
-    fieldbus_send(fieldbus);
-    info("done\n");
-
     info("Waiting all slaves in OP state... ");
     for (n = 0; n < 10000; ++n) {
+        fieldbus_receive(fieldbus);
+        fieldbus_send(fieldbus);
+        usleep(500);
         ecrt_master_state(fieldbus->master, &state);
         if (state.al_states == EC_AL_STATE_OP) {
             break;
         }
-        usleep(500);
-        fieldbus_receive(fieldbus);
-        fieldbus_send(fieldbus);
     }
     if (state.al_states != EC_AL_STATE_OP) {
         const char *prefix = "";
@@ -386,7 +407,7 @@ fieldbus_stop(Fieldbus *fieldbus)
 static int
 fieldbus_dump(Fieldbus *fieldbus)
 {
-    int wkc = fieldbus->domain1_state.working_counter;
+    int wkc = fieldbus->domain_state.working_counter;
     int i;
 
     info("Iteration %" PRIu64 ":  %" PRId64 " usec WKC %d",
@@ -453,9 +474,14 @@ main(int argc, char *argv[])
     int errors = 0;
     uint64_t iterations = 100000 / (period / 100 + 3);
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
+
+    int status;
     while (++fieldbus.iteration < iterations) {
-        if (! fieldbus_iterate(&fieldbus, cycle) ||
-            ! silent && ! fieldbus_dump(&fieldbus)) {
+        status = fieldbus_iterate(&fieldbus, cycle);
+        if (status < 0) {
+            ++errors;
+            info("Error %d\n", status);
+        } else if (! silent && ! fieldbus_dump(&fieldbus)) {
             ++errors;
         } else if (max_time == 0) {
             min_time = max_time = fieldbus.iteration_time;
