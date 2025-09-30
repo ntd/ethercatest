@@ -291,7 +291,7 @@ digital_counter(Fieldbus *fieldbus)
 static void
 usage(void)
 {
-    info("Usage: ethercatest-soem [INTERFACE] [PERIOD]\n"
+    info("Usage: ethercatest-soem [-q|--quiet] [INTERFACE] [PERIOD]\n"
          "  [INTERFACE] Ethernet device to use (e.g. 'eth0')\n"
          "  [PERIOD]    Scantime in us (0 for roundtrip performances)\n");
 }
@@ -300,37 +300,38 @@ int
 main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
+    const char *iface, *arg;
     unsigned long period;
+    int n, silent;
 
     setbuf(stdout, NULL);
 
     fieldbus_initialize(&fieldbus);
 
     /* Parse arguments */
+    iface = NULL;
     period = 5000;
-    if (argc == 1) {
-        fieldbus.iface = get_default_interface();
-    } else if (argc == 3) {
-        fieldbus.iface = argv[1];
-        period = atoi(argv[2]);
-    } else if (argc == 2) {
-        if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
+    silent = 0;
+
+    for (n = 1; n < argc; ++n) {
+        arg = argv[n];
+        if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
             usage();
             return 0;
-        } else if (all_digits(argv[1])) {
-            /* There is one number argument only */
-            fieldbus.iface = get_default_interface();
-            period = atoi(argv[1]);
+        } else if (strcmp(arg, "-q") == 0 || strcmp(arg, "--quiet") == 0) {
+            silent = 1;
+        } else if (all_digits(arg)) {
+            period = atoi(arg);
+        } else if (iface != NULL) {
+            info("Invalid arguments.\n");
+            usage();
+            return 1;
         } else {
-            /* There is one string argument only */
-            fieldbus.iface = argv[1];
+            iface = arg;
         }
-    } else {
-        info("Invalid arguments.\n");
-        usage();
-        return 1;
     }
 
+    fieldbus.iface = iface == NULL ? get_default_interface() : iface;
     if (! fieldbus_start(&fieldbus)) {
         return 2;
     }
@@ -343,7 +344,7 @@ main(int argc, char *argv[])
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
     while (++fieldbus.iteration < iterations) {
         if (! fieldbus_iterate(&fieldbus, cycle) ||
-            ! fieldbus_dump(&fieldbus)) {
+            ! silent && ! fieldbus_dump(&fieldbus)) {
             ++errors;
             fieldbus_recover(&fieldbus);
         } else if (max_time == 0) {
