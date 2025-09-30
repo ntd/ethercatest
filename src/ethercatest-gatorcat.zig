@@ -31,6 +31,7 @@ const Fieldbus = struct {
     allocator: std.mem.Allocator = undefined,
     iface: ?[:0]const u8 = null,
     period: u32 = 5000,
+    silent: bool = false,
     socket: ?gcat.nic.RawSocket = null,
     port: ?gcat.Port = null,
     eni: ?gcat.Arena(gcat.ENI) = null,
@@ -52,6 +53,8 @@ const Fieldbus = struct {
                 usage();
                 self.deinit();
                 return false;
+            } else if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, "--quiet")) {
+                self.silent = true;
             } else if (std.fmt.parseUnsigned(u32, arg, 10)) |period| {
                 self.period = period;
             } else |_| {
@@ -222,7 +225,9 @@ pub fn main() !void {
 
     while (fieldbus.iteration < iterations) {
         try fieldbus.iterate();
-        fieldbus.dump();
+        if (! fieldbus.silent) {
+            fieldbus.dump();
+        }
 
         const time = fieldbus.iteration_time;
         if (max_time == 0) {
