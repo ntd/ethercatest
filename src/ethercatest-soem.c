@@ -318,6 +318,7 @@ main(int argc, char *argv[])
     } else if (argc == 2) {
         if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
             usage();
+            return 0;
         } else if (all_digits(argv[1])) {
             /* There is one number argument only */
             fieldbus.iface = get_default_interface();
@@ -329,32 +330,33 @@ main(int argc, char *argv[])
     } else {
         info("Invalid arguments.\n");
         usage();
+        return 1;
     }
 
-    /* On invalid arguments, `fieldbus.iface` will be empty
-     * so `fieldbus_start` will fail */
-    if (fieldbus_start(&fieldbus)) {
-        int64_t min_time = 0;
-        int64_t max_time = 0;
-        uint64_t iterations = 100000 / (period / 100 + 1);
-        FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
-        while (++fieldbus.iteration < iterations) {
-            if (! fieldbus_iterate(&fieldbus, cycle) ||
-                ! fieldbus_dump(&fieldbus)) {
-                fieldbus_recover(&fieldbus);
-            } else if (max_time == 0) {
-                min_time = max_time = fieldbus.iteration_time;
-            } else if (fieldbus.iteration_time < min_time) {
-                min_time = fieldbus.iteration_time;
-            } else if (fieldbus.iteration_time > max_time) {
-                max_time = fieldbus.iteration_time;
-            }
-            wait_next_iteration(fieldbus.iteration_time, period);
-        }
-        info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
-             min_time, max_time);
-        fieldbus_stop(&fieldbus);
+    if (! fieldbus_start(&fieldbus)) {
+        return 2;
     }
+
+    int64_t min_time = 0;
+    int64_t max_time = 0;
+    uint64_t iterations = 100000 / (period / 100 + 1);
+    FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
+    while (++fieldbus.iteration < iterations) {
+        if (! fieldbus_iterate(&fieldbus, cycle) ||
+            ! fieldbus_dump(&fieldbus)) {
+            fieldbus_recover(&fieldbus);
+        } else if (max_time == 0) {
+            min_time = max_time = fieldbus.iteration_time;
+        } else if (fieldbus.iteration_time < min_time) {
+            min_time = fieldbus.iteration_time;
+        } else if (fieldbus.iteration_time > max_time) {
+            max_time = fieldbus.iteration_time;
+        }
+        wait_next_iteration(fieldbus.iteration_time, period);
+    }
+    info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "\n",
+         min_time, max_time);
+    fieldbus_stop(&fieldbus);
 
     return 0;
 }
