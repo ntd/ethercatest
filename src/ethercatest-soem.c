@@ -339,7 +339,7 @@ main(int argc, char *argv[])
 
     int64_t min_time = 0;
     int64_t max_time = 0;
-    uint64_t iterations = 100000 / (period / 100 + 1);
+    uint64_t iterations = 100000 / (period / 100 + 3);
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
     while (++fieldbus.iteration < iterations) {
         if (! fieldbus_iterate(&fieldbus, cycle) ||

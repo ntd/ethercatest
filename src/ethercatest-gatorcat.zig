@@ -217,7 +217,7 @@ pub fn main() !void {
 
     var min_time: i64 = 0;
     var max_time: i64 = 0;
-    const iterations: u64 = 100_000 / (fieldbus.period / 100 + 1);
+    const iterations: u64 = 100_000 / (fieldbus.period / 100 + 3);
 
     while (fieldbus.iteration < iterations) {
         try fieldbus.iterate();
