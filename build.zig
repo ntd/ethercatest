@@ -66,6 +66,10 @@ fn checkSystemLibrary(b: *std.Build, name: []const u8) bool {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const cflags = if (optimize == .Debug)
+        &[_][]const u8{ "-g" }
+    else
+        &[_][]const u8{ "-O2" };
 
     if (checkSystemLibrary(b, "libethercat")) {
         const igh = b.addExecutable(.{
@@ -81,6 +85,7 @@ pub fn build(b: *std.Build) void {
                 "src/ethercatest-igh.c",
                 "src/ethercatest.c",
             },
+            .flags = cflags,
         });
         igh.linkSystemLibrary("libethercat");
         b.installArtifact(igh);
@@ -100,8 +105,31 @@ pub fn build(b: *std.Build) void {
                 "src/ethercatest-soem.c",
                 "src/ethercatest.c",
             },
+            .flags = cflags,
         });
         soem.linkSystemLibrary("soem");
         b.installArtifact(soem);
     }
+
+    std.debug.print("'gatorcat' is always included\n", .{});
+    const gatorcat = b.addExecutable(.{
+        .name = "ethercatest-gatorcat",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/ethercatest-gatorcat.zig"),
+            .link_libc = true,
+        }),
+    });
+    gatorcat.addIncludePath(b.path("src"));
+    gatorcat.addCSourceFile(.{
+        .file = b.path("src/ethercatest.c"),
+        .flags = cflags,
+    });
+    const gatorcat_dep = b.dependency("gatorcat", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    gatorcat.root_module.addImport("gatorcat", gatorcat_dep.module("gatorcat"));
+    b.installArtifact(gatorcat);
 }

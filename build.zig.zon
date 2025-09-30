@@ -1,0 +1,12 @@
+.{
+    .name = .ethercatest,
+    .version = "0.15.1",
+    .dependencies = .{
+        .gatorcat = .{
+            .url = "git+https://github.com/jeffective/gatorcat#57d9535fa87194453e998848e39974bb70a46893",
+            .hash = "gatorcat-0.4.0-WcrpTb8YCAAgW-oRMDfzfUh72xlQqQjjuh59DB2gsLRI",
+        },
+    },
+    .paths = .{""},
+    .fingerprint = 0x62e8600c398c8857,
+}
