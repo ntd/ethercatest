@@ -41,7 +41,7 @@ wait_next_iteration(int64_t iteration_time, int64_t period)
 {
     if (period == 0) {
     } else if (iteration_time > period) {
-        info("\n Iteration time overflow (%" PRId64 " usec)\n", iteration_time);
+        info("\n Time overflow (%" PRId64 " usec)\n", iteration_time);
     } else {
         usleep(period - iteration_time);
     }
