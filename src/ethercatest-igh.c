@@ -22,6 +22,7 @@
 #include <ecrt.h>
 #include <inttypes.h>
 #include <string.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 
@@ -352,6 +353,11 @@ fieldbus_start(Fieldbus *fieldbus)
     }
     info("\n");
 
+    /* Silent application time warning */
+    struct timeval tod;
+    gettimeofday(&tod, NULL);
+    ecrt_master_application_time(fieldbus->master, EC_TIMEVAL2NANO(tod));
+
     info("Activating configuration... ");
     if (ecrt_master_activate(fieldbus->master) != 0) {
         info("failed\n");
@@ -494,6 +500,10 @@ main(int argc, char *argv[])
         total_time += fieldbus.iteration_time;
         wait_next_iteration(fieldbus.iteration_time, period);
     }
+
+    /* Receive the last packet */
+    fieldbus_receive(&fieldbus);
+
     info("\nIteration time (usec): min %" PRId64 "  max %" PRId64 "  total %" PRId64 "  errors %d\n",
          min_time, max_time, total_time, errors);
     fieldbus_stop(&fieldbus);
