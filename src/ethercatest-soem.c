@@ -53,27 +53,41 @@ fieldbus_initialize(Fieldbus *fieldbus)
 }
 
 static int
+fieldbus_send(Fieldbus *fieldbus)
+{
+    fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
+    return 1;
+}
+
+static int
+fieldbus_receive(Fieldbus *fieldbus)
+{
+    return ecx_send_processdata(&fieldbus->context) > 0;
+}
+
+static int
 fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
 {
     int64_t start, stop;
-    ecx_contextt *context;
     int status;
-
-    context = &fieldbus->context;
 
     start = get_monotonic_time();
 
-    fieldbus->wkc = ecx_receive_processdata(context, EC_TIMEOUTRET);
+    if (! fieldbus_receive(fieldbus)) {
+        return 0;
+    }
     if (callback != NULL) {
         callback(fieldbus);
     }
-    status = ecx_send_processdata(context);
+    if (! fieldbus_send(fieldbus)) {
+        return 0;
+    }
 
     stop = get_monotonic_time();
 
     ++fieldbus->iteration;
     fieldbus->iteration_time = stop - start;
-    return status > 0;
+    return 1;
 }
 
 static int
@@ -182,37 +196,6 @@ fieldbus_stop(Fieldbus *fieldbus)
     info("done\n");
 }
 
-static int
-fieldbus_dump(Fieldbus *fieldbus)
-{
-    ecx_contextt *context;
-    ec_groupt *grp;
-    uint32 n;
-    int expected_wkc;
-
-    context = &fieldbus->context;
-    grp = context->grouplist + fieldbus->group;
-
-    expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
-    info("Iteration %" PRIu64 ":  %" PRId64 " usec  WKC %d",
-         fieldbus->iteration, fieldbus->iteration_time, fieldbus->wkc);
-    if (fieldbus->wkc != expected_wkc) {
-        info(" wrong (expected %d)\n", expected_wkc);
-        return FALSE;
-    }
-
-    info("  O:");
-    for (n = 0; n < grp->Obytes; ++n) {
-        info(" %02X", grp->outputs[n]);
-    }
-    info("  I:");
-    for (n = 0; n < grp->Ibytes; ++n) {
-        info(" %02X", grp->inputs[n]);
-    }
-    info("  T: %lld\r", (long long) context->DCtime);
-    return TRUE;
-}
-
 static void
 fieldbus_recover(Fieldbus *fieldbus)
 {
@@ -267,17 +250,33 @@ fieldbus_recover(Fieldbus *fieldbus)
     }
 }
 
-static int
-all_digits(const char *string)
+static void
+fieldbus_dump(Fieldbus *fieldbus)
 {
-    const char *ch;
-    for (ch = string; *ch != '\0'; ++ch) {
-        if (! isdigit(*ch)) {
-            return FALSE;
-        }
+    ecx_contextt *context;
+    ec_groupt *grp;
+    uint32 n;
+    int expected_wkc;
+
+    context = &fieldbus->context;
+    grp = context->grouplist + fieldbus->group;
+
+    expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
+    info("Iteration %" PRIu64 ":  %" PRId64 " usec  WKC %d",
+         fieldbus->iteration, fieldbus->iteration_time, fieldbus->wkc);
+    if (fieldbus->wkc != expected_wkc) {
+        info(" wrong (expected %d)\n", expected_wkc);
     }
-    /* An empty string is not considered a valid number */
-    return ch != string;
+
+    info("  O:");
+    for (n = 0; n < grp->Obytes; ++n) {
+        info(" %02X", grp->outputs[n]);
+    }
+    info("  I:");
+    for (n = 0; n < grp->Ibytes; ++n) {
+        info(" %02X", grp->inputs[n]);
+    }
+    info("  T: %lld\r", (long long) context->DCtime);
 }
 
 static void
@@ -301,7 +300,8 @@ main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
     const char *iface, *arg;
-    unsigned long period;
+    char *tail;
+    long period;
     int n, silent;
 
     setbuf(stdout, NULL);
@@ -320,14 +320,18 @@ main(int argc, char *argv[])
             return 0;
         } else if (strcmp(arg, "-q") == 0 || strcmp(arg, "--quiet") == 0) {
             silent = 1;
-        } else if (all_digits(arg)) {
-            period = atoi(arg);
-        } else if (iface != NULL) {
-            info("Invalid arguments.\n");
-            usage();
-            return 1;
-        } else {
-            iface = arg;
+        } else if (arg[0] != '\0') {
+            char *endptr;
+            long value = strtol(arg, &endptr, 10);
+            if (*endptr == '\0') {
+                period = value;
+            } else if (iface != NULL) {
+                info("Invalid arguments.\n");
+                usage();
+                return 1;
+            } else {
+                iface = arg;
+            }
         }
     }
 
@@ -342,12 +346,17 @@ main(int argc, char *argv[])
     int errors = 0;
     uint64_t iterations = 100000 / (period / 100 + 3);
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
+
     while (++fieldbus.iteration < iterations) {
-        if (! fieldbus_iterate(&fieldbus, cycle) ||
-            ! silent && ! fieldbus_dump(&fieldbus)) {
+        if (! fieldbus_iterate(&fieldbus, cycle)) {
             ++errors;
-            fieldbus_recover(&fieldbus);
-        } else if (max_time == 0) {
+            info("\nIteration error\n");
+            continue;
+        }
+        if (! silent) {
+            fieldbus_dump(&fieldbus);
+        }
+        if (max_time == 0) {
             min_time = max_time = fieldbus.iteration_time;
         } else if (fieldbus.iteration_time < min_time) {
             min_time = fieldbus.iteration_time;
