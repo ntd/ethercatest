@@ -2,6 +2,16 @@
 # Usage:
 #   ethercatest.sh STACK [PERIOD]
 # where STACK can be soem, gatorcat or igh.
+#
+# The time measured should give an idea of the stack overhead. In
+# pseudocode:
+#
+# - Start timer
+# - Receive packet
+# - digital_counter() (negligible time)
+# - Send packet
+# - Stop timer (time = stop - start)
+# - Wait till next period (1 ms)
 
 die() {
     echo "$1" >&2
