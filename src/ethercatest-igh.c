@@ -479,7 +479,7 @@ main(int argc, char *argv[])
 
     int status;
     info("Starting loop cycle with %ld us period\n", period);
-    while (++fieldbus.iteration < iterations) {
+    while (fieldbus.iteration < iterations) {
         status = fieldbus_iterate(&fieldbus, cycle);
         if (status < 0) {
             ++errors;

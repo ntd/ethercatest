@@ -346,7 +346,7 @@ main(int argc, char *argv[])
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
 
     info("Starting loop cycle with %ld us period\n", period);
-    while (++fieldbus.iteration < iterations) {
+    while (fieldbus.iteration < iterations) {
         if (! fieldbus_iterate(&fieldbus, cycle)) {
             ++errors;
             info("\nIteration error\n");
