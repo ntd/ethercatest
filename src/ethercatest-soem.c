@@ -20,7 +20,6 @@
 
 #include "ethercatest.h"
 #include <soem/soem.h>
-#include <ctype.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,14 +54,14 @@ fieldbus_initialize(Fieldbus *fieldbus)
 static int
 fieldbus_send(Fieldbus *fieldbus)
 {
-    fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
-    return 1;
+    return ecx_send_processdata(&fieldbus->context);
 }
 
 static int
 fieldbus_receive(Fieldbus *fieldbus)
 {
-    return ecx_send_processdata(&fieldbus->context) > 0;
+    fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
+    return 1;
 }
 
 static int
@@ -300,7 +299,6 @@ main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
     const char *iface, *arg;
-    char *tail;
     long period;
     int n, silent;
 
