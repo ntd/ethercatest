@@ -39,74 +39,74 @@ typedef void (*FieldbusCallback)(Fieldbus *);
 
 
 static void
-fieldbus_initialize(Fieldbus *fieldbus)
+fieldbus_initialize(Fieldbus *self)
 {
-    /* Let's start by 0-filling `fieldbus` to avoid surprises */
-    memset(fieldbus, 0, sizeof(*fieldbus));
+    /* Let's start by 0-filling `self` to avoid surprises */
+    memset(self, 0, sizeof(*self));
 
-    fieldbus->iface = NULL;
-    fieldbus->group = 0;
-    fieldbus->wkc = 0;
-    fieldbus->iteration = 0;
-    fieldbus->iteration_time = 0;
+    self->iface = NULL;
+    self->group = 0;
+    self->wkc = 0;
+    self->iteration = 0;
+    self->iteration_time = 0;
 }
 
 static int
-fieldbus_send(Fieldbus *fieldbus)
+fieldbus_send(Fieldbus *self)
 {
-    return ecx_send_processdata(&fieldbus->context);
+    return ecx_send_processdata(&self->context);
 }
 
 static int
-fieldbus_receive(Fieldbus *fieldbus)
+fieldbus_receive(Fieldbus *self)
 {
-    fieldbus->wkc = ecx_receive_processdata(&fieldbus->context, EC_TIMEOUTRET);
+    self->wkc = ecx_receive_processdata(&self->context, EC_TIMEOUTRET);
     return 1;
 }
 
 static int
-fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
+fieldbus_iterate(Fieldbus *self, FieldbusCallback callback)
 {
     int64_t start, stop;
     int status;
 
     start = get_monotonic_time();
 
-    if (! fieldbus_receive(fieldbus)) {
+    if (! fieldbus_receive(self)) {
         return 0;
     }
     if (callback != NULL) {
-        callback(fieldbus);
+        callback(self);
     }
-    if (! fieldbus_send(fieldbus)) {
+    if (! fieldbus_send(self)) {
         return 0;
     }
 
     stop = get_monotonic_time();
 
-    ++fieldbus->iteration;
-    fieldbus->iteration_time = stop - start;
+    ++self->iteration;
+    self->iteration_time = stop - start;
     return 1;
 }
 
 static int
-fieldbus_start(Fieldbus *fieldbus)
+fieldbus_start(Fieldbus *self)
 {
     ecx_contextt *context;
     ec_groupt *grp;
     ec_slavet *slave;
     int i;
 
-    if (fieldbus->iface == NULL) {
+    if (self->iface == NULL) {
         /* Fieldbus not configured: just bail out */
         return FALSE;
     }
 
-    context = &fieldbus->context;
-    grp = context->grouplist + fieldbus->group;
+    context = &self->context;
+    grp = context->grouplist + self->group;
 
-    info("Initializing SOEM on '%s'... ", fieldbus->iface);
-    if (! ecx_init(context, fieldbus->iface)) {
+    info("Initializing SOEM on '%s'... ", self->iface);
+    if (! ecx_init(context, self->iface)) {
         info("no socket connection\n");
         return FALSE;
     }
@@ -120,7 +120,7 @@ fieldbus_start(Fieldbus *fieldbus)
     info("%d slaves found\n", context->slavecount);
 
     info("Sequential mapping of I/O... ");
-    ecx_config_map_group(context, fieldbus->map, fieldbus->group);
+    ecx_config_map_group(context, self->map, self->group);
     info("mapped %dO+%dI bytes from %d segments",
          grp->Obytes, grp->Ibytes, grp->nsegments);
     if (grp->nsegments > 1) {
@@ -152,7 +152,7 @@ fieldbus_start(Fieldbus *fieldbus)
     /* Poll the result ten times before giving up */
     for (i = 0; i < 10; ++i) {
         info(".");
-        fieldbus_iterate(fieldbus, NULL);
+        fieldbus_iterate(self, NULL);
         ecx_statecheck(context, 0, EC_STATE_OPERATIONAL, EC_TIMEOUTSTATE / 10);
         if (slave->state == EC_STATE_OPERATIONAL) {
             info(" all slaves are now operational\n");
@@ -176,12 +176,12 @@ fieldbus_start(Fieldbus *fieldbus)
 }
 
 static void
-fieldbus_stop(Fieldbus *fieldbus)
+fieldbus_stop(Fieldbus *self)
 {
     ecx_contextt *context;
     ec_slavet *slave;
 
-    context = &fieldbus->context;
+    context = &self->context;
     /* Act on slave 0 (a virtual slave used for broadcasting) */
     slave = context->slavelist;
 
@@ -196,20 +196,20 @@ fieldbus_stop(Fieldbus *fieldbus)
 }
 
 static void
-fieldbus_recover(Fieldbus *fieldbus)
+fieldbus_recover(Fieldbus *self)
 {
     ecx_contextt *context;
     ec_groupt *grp;
     ec_slavet *slave;
     int i;
 
-    context = &fieldbus->context;
-    grp = context->grouplist + fieldbus->group;
+    context = &self->context;
+    grp = context->grouplist + self->group;
     grp->docheckstate = FALSE;
     ecx_readstate(context);
     for (i = 1; i <= context->slavecount; ++i) {
         slave = context->slavelist + i;
-        if (slave->group != fieldbus->group) {
+        if (slave->group != self->group) {
             /* This slave is part of another group: do nothing */
         } else if (slave->state != EC_STATE_OPERATIONAL) {
             grp->docheckstate = TRUE;
@@ -250,20 +250,20 @@ fieldbus_recover(Fieldbus *fieldbus)
 }
 
 static void
-fieldbus_dump(Fieldbus *fieldbus)
+fieldbus_dump(Fieldbus *self)
 {
     ecx_contextt *context;
     ec_groupt *grp;
     uint32 n;
     int expected_wkc;
 
-    context = &fieldbus->context;
-    grp = context->grouplist + fieldbus->group;
+    context = &self->context;
+    grp = context->grouplist + self->group;
 
     expected_wkc = grp->outputsWKC * 2 + grp->inputsWKC;
     info("Iteration %" PRIu64 ":  %" PRId64 " usec  WKC %d",
-         fieldbus->iteration, fieldbus->iteration_time, fieldbus->wkc);
-    if (fieldbus->wkc != expected_wkc) {
+         self->iteration, self->iteration_time, self->wkc);
+    if (self->wkc != expected_wkc) {
         info(" wrong (expected %d)\n", expected_wkc);
     }
 
@@ -279,11 +279,11 @@ fieldbus_dump(Fieldbus *fieldbus)
 }
 
 static void
-digital_counter(Fieldbus *fieldbus)
+digital_counter(Fieldbus *self)
 {
     /* Show a digital counter that updates every 20 iterations
      * in the first 8 digital outputs */
-    fieldbus->map[0] = fieldbus->iteration / 20;
+    self->map[0] = self->iteration / 20;
 }
 
 static void

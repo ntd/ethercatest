@@ -66,73 +66,73 @@ typedef void (*FieldbusCallback)(Fieldbus *);
 
 
 static void
-fieldbus_initialize(Fieldbus *fieldbus)
+fieldbus_initialize(Fieldbus *self)
 {
-    /* Let's start by 0-filling `fieldbus` to avoid surprises */
-    memset(fieldbus, 0, sizeof(*fieldbus));
+    /* Let's start by 0-filling `self` to avoid surprises */
+    memset(self, 0, sizeof(*self));
 
-    fieldbus->master = NULL;
-    fieldbus->domain = NULL;
-    fieldbus->map = NULL;
-    fieldbus->iteration = 0;
-    fieldbus->iteration_time = 0;
+    self->master = NULL;
+    self->domain = NULL;
+    self->map = NULL;
+    self->iteration = 0;
+    self->iteration_time = 0;
 }
 
 static int
-fieldbus_send(Fieldbus *fieldbus)
-{
-    int status;
-
-    status = ecrt_domain_queue(fieldbus->domain);
-    if (status < 0) {
-        return status;
-    }
-
-    return ecrt_master_send(fieldbus->master);
-}
-
-static int
-fieldbus_receive(Fieldbus *fieldbus)
+fieldbus_send(Fieldbus *self)
 {
     int status;
 
-    status = ecrt_master_receive(fieldbus->master);
+    status = ecrt_domain_queue(self->domain);
     if (status < 0) {
         return status;
     }
 
-    status = ecrt_domain_process(fieldbus->domain);
-    if (status < 0) {
-        return status;
-    }
-
-    return ecrt_domain_state(fieldbus->domain, &fieldbus->domain_state);
+    return ecrt_master_send(self->master);
 }
 
 static int
-fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
+fieldbus_receive(Fieldbus *self)
+{
+    int status;
+
+    status = ecrt_master_receive(self->master);
+    if (status < 0) {
+        return status;
+    }
+
+    status = ecrt_domain_process(self->domain);
+    if (status < 0) {
+        return status;
+    }
+
+    return ecrt_domain_state(self->domain, &self->domain_state);
+}
+
+static int
+fieldbus_iterate(Fieldbus *self, FieldbusCallback callback)
 {
     int64_t start, stop;
     int status;
 
     start = get_monotonic_time();
 
-    status = fieldbus_receive(fieldbus);
+    status = fieldbus_receive(self);
     if (status < 0) {
         return status;
     }
     if (callback != NULL) {
-        callback(fieldbus);
+        callback(self);
     }
-    status = fieldbus_send(fieldbus);
+    status = fieldbus_send(self);
     if (status < 0) {
         return status;
     }
 
     stop = get_monotonic_time();
 
-    ++fieldbus->iteration;
-    fieldbus->iteration_time = stop - start;
+    ++self->iteration;
+    self->iteration_time = stop - start;
     return 0;
 }
 
@@ -199,14 +199,14 @@ traverse_slave(TraverserData *data)
 }
 
 static int
-fieldbus_traverse_pdo_entries(Fieldbus *fieldbus,
+fieldbus_traverse_pdo_entries(Fieldbus *self,
                               TraverserCallback callback, void *context)
 {
     TraverserData data;
-    data.fieldbus = fieldbus;
+    data.fieldbus = self;
     data.callback = callback;
     data.context  = context;
-    for (data.nslave = 0; data.nslave < fieldbus->master_info.slave_count; ++data.nslave) {
+    for (data.nslave = 0; data.nslave < self->master_info.slave_count; ++data.nslave) {
         if (! traverse_slave(&data)) {
             return FALSE;
         }
@@ -291,7 +291,7 @@ traverser_configurer(TraverserData *data)
 }
 
 static int
-fieldbus_autoconfigure(Fieldbus *fieldbus)
+fieldbus_autoconfigure(Fieldbus *self)
 {
     TraverseConfiguration configuration = {
         .prefix = "",
@@ -301,13 +301,13 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
     /* Fill process data with outputs first and inputs last,
      * similarily to what done by SOEM legacy */
     configuration.dir = EC_DIR_OUTPUT;
-    if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
+    if (! fieldbus_traverse_pdo_entries(self, traverser_configurer, &configuration)) {
         return FALSE;
     }
     dump_configuration(&configuration);
 
     configuration.dir = EC_DIR_INPUT;
-    if (! fieldbus_traverse_pdo_entries(fieldbus, traverser_configurer, &configuration)) {
+    if (! fieldbus_traverse_pdo_entries(self, traverser_configurer, &configuration)) {
         return FALSE;
     }
     dump_configuration(&configuration);
@@ -316,36 +316,36 @@ fieldbus_autoconfigure(Fieldbus *fieldbus)
 }
 
 static int
-fieldbus_start(Fieldbus *fieldbus)
+fieldbus_start(Fieldbus *self)
 {
     ec_master_state_t state;
     int n;
 
-    if (fieldbus->master != NULL) {
+    if (self->master != NULL) {
         /* Fieldbus already configured: just bail out */
         return TRUE;
     }
 
     info("Allocating master resources... ");
-    fieldbus->master = ecrt_request_master(0);
-    if (fieldbus->master == NULL) {
+    self->master = ecrt_request_master(0);
+    if (self->master == NULL) {
         return FALSE;
     }
-    if (ecrt_master(fieldbus->master, &fieldbus->master_info) != 0) {
+    if (ecrt_master(self->master, &self->master_info) != 0) {
         return FALSE;
     }
     info("done\n");
 
     info("Creating domain... ");
-    fieldbus->domain = ecrt_master_create_domain(fieldbus->master);
-    if (fieldbus->domain == NULL) {
+    self->domain = ecrt_master_create_domain(self->master);
+    if (self->domain == NULL) {
         info("failed\n");
         return FALSE;
     }
     info("done\n");
 
     info("Autoconfiguring slaves... ");
-    if (! fieldbus_autoconfigure(fieldbus)) {
+    if (! fieldbus_autoconfigure(self)) {
         info("failed\n");
         return FALSE;
     }
@@ -354,18 +354,18 @@ fieldbus_start(Fieldbus *fieldbus)
     /* Silent application time warning */
     struct timeval tod;
     gettimeofday(&tod, NULL);
-    ecrt_master_application_time(fieldbus->master, EC_TIMEVAL2NANO(tod));
+    ecrt_master_application_time(self->master, EC_TIMEVAL2NANO(tod));
 
     info("Activating configuration... ");
-    if (ecrt_master_activate(fieldbus->master) != 0) {
+    if (ecrt_master_activate(self->master) != 0) {
         info("failed\n");
         return FALSE;
     }
     info("done\n");
 
     info("Get domain process data... ");
-    fieldbus->map = ecrt_domain_data(fieldbus->domain);
-    if (fieldbus->map == NULL) {
+    self->map = ecrt_domain_data(self->domain);
+    if (self->map == NULL) {
         info("failed\n");
         return FALSE;
     }
@@ -373,10 +373,10 @@ fieldbus_start(Fieldbus *fieldbus)
 
     info("Waiting all slaves in OP state... ");
     for (n = 0; n < 10000; ++n) {
-        fieldbus_receive(fieldbus);
-        fieldbus_send(fieldbus);
+        fieldbus_receive(self);
+        fieldbus_send(self);
         usleep(500);
-        ecrt_master_state(fieldbus->master, &state);
+        ecrt_master_state(self->master, &state);
         if (state.al_states == EC_AL_STATE_OP) {
             break;
         }
@@ -384,8 +384,8 @@ fieldbus_start(Fieldbus *fieldbus)
     if (state.al_states != EC_AL_STATE_OP) {
         const char *prefix = "";
         ec_slave_info_t slave_info;
-        for (n = 0; n < fieldbus->master_info.slave_count; ++n) {
-            ecrt_master_get_slave(fieldbus->master, n, &slave_info);
+        for (n = 0; n < self->master_info.slave_count; ++n) {
+            ecrt_master_get_slave(self->master, n, &slave_info);
             if (slave_info.al_state != EC_AL_STATE_OP) {
                 info("%s%s still in %u", prefix, slave_info.name, slave_info.al_state);
                 prefix = ", ";
@@ -400,35 +400,35 @@ fieldbus_start(Fieldbus *fieldbus)
 }
 
 static void
-fieldbus_stop(Fieldbus *fieldbus)
+fieldbus_stop(Fieldbus *self)
 {
-    if (fieldbus->master != NULL) {
-        ecrt_release_master(fieldbus->master);
-        fieldbus->master = NULL;
+    if (self->master != NULL) {
+        ecrt_release_master(self->master);
+        self->master = NULL;
     }
 }
 
 static void
-fieldbus_dump(Fieldbus *fieldbus)
+fieldbus_dump(Fieldbus *self)
 {
-    int wkc = fieldbus->domain_state.working_counter;
+    int wkc = self->domain_state.working_counter;
     int i;
 
     info("Iteration %" PRIu64 ":  %" PRId64 " usec  WKC %d",
-         fieldbus->iteration, fieldbus->iteration_time, wkc);
+         self->iteration, self->iteration_time, wkc);
 
-    for (i = 0; i < ecrt_domain_size(fieldbus->domain); ++i) {
-        info(" %02X", fieldbus->map[i]);
+    for (i = 0; i < ecrt_domain_size(self->domain); ++i) {
+        info(" %02X", self->map[i]);
     }
     info("   \r");
 }
 
 static void
-digital_counter(Fieldbus *fieldbus)
+digital_counter(Fieldbus *self)
 {
     /* Show a digital counter that updates every 20 iterations
      * in the first 8 digital outputs */
-    fieldbus->map[0] = fieldbus->iteration / 20;
+    self->map[0] = self->iteration / 20;
 }
 
 static void
