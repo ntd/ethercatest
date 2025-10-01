@@ -121,11 +121,9 @@ fieldbus_iterate(Fieldbus *fieldbus, FieldbusCallback callback)
     if (status < 0) {
         return status;
     }
-
     if (callback != NULL) {
         callback(fieldbus);
     }
-
     status = fieldbus_send(fieldbus);
     if (status < 0) {
         return status;
@@ -445,7 +443,7 @@ main(int argc, char *argv[])
 {
     Fieldbus fieldbus;
     const char *arg;
-    unsigned long period;
+    long period;
     int n, silent;
 
     setbuf(stdout, NULL);
@@ -480,6 +478,7 @@ main(int argc, char *argv[])
     FieldbusCallback cycle = period > 0 ? digital_counter : NULL;
 
     int status;
+    info("Starting loop cycle with %ld us period\n", period);
     while (++fieldbus.iteration < iterations) {
         status = fieldbus_iterate(&fieldbus, cycle);
         if (status < 0) {
