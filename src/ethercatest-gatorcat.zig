@@ -160,7 +160,7 @@ const Fieldbus = struct {
             self.md = try gcat.MainDevice.init(
                 self.allocator,
                 try self.getPort(),
-                .{ .recv_timeout_us = 20_000, .eeprom_timeout_us = 10_000 },
+                .{ .recv_timeout_us = 1_000_000, .eeprom_timeout_us = 1_000_000 },
                 eni.*.value,
             );
             info("gcat.MainDevice.init() succeeded\n", .{});
