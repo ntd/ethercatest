@@ -199,8 +199,7 @@ const Fieldbus = struct {
 
     pub fn dump(self: *const Fieldbus) void {
         info("Iteration {d}: {d} usec\r", .{
-            self.iteration,
-            self.iteration_time,
+            self.iteration, self.iteration_time
         });
     }
 };
@@ -224,6 +223,9 @@ pub fn main() !void {
     var errors: u32 = 0;
     const iterations: u64 = 100_000 / (fieldbus.period / 100 + 3);
 
+    info("Starting loop cycle with {d} us period\n", .{
+        fieldbus.period
+    });
     while (fieldbus.iteration < iterations) {
         fieldbus.iterate() catch { errors += 1; };
         if (! fieldbus.silent) {
@@ -245,6 +247,6 @@ pub fn main() !void {
     }
 
     info("\nIteration time (usec): min {d}  max {d}  total {d}  errors {d}\n", .{
-        min_time, max_time, total_time, errors,
+        min_time, max_time, total_time, errors
     });
 }
