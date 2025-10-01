@@ -27,6 +27,20 @@ fn getValidInterface() [:0]const u8 {
     return std.mem.span(c.get_default_interface());
 }
 
+const FieldbusCallback = *const fn (fieldbus: *Fieldbus) void;
+
+fn digital_counter(fieldbus: *Fieldbus) void {
+    const md = fieldbus.getMD() catch unreachable;
+
+    // XXX: not sure how to programmatically map the outputs,
+    // so hardcoding my EtherCAT topology here: the second
+    // subdevice of my only EtherCAT node is an EL2808
+    const el2808 = md.*.subdevices[1];
+
+    // Show a digital counter that updates every 20 iterations
+    el2808.runtime_info.pi.outputs[0] = @truncate(fieldbus.iteration / 20);
+}
+
 const Fieldbus = struct {
     allocator: std.mem.Allocator = undefined,
     iface: ?[:0]const u8 = null,
@@ -173,27 +187,14 @@ const Fieldbus = struct {
         info("Send initial packet\n", .{});
     }
 
-    fn digital_counter(self: *Fieldbus) void {
-        const md = self.getMD() catch unreachable;
-
-        // XXX: not sure how to programmatically map the outputs,
-        // so hardcoding my EtherCAT topology here: the second
-        // subdevice of my only EtherCAT node is an EL2808
-        const el2808 = md.*.subdevices[1];
-
-        // Show a digital counter that updates every 20 iterations
-        el2808.runtime_info.pi.outputs[0] = @truncate(self.iteration / 20);
-    }
-
-    pub fn iterate(self: *Fieldbus) !void {
+    pub fn iterate(self: *Fieldbus, callback: ?FieldbusCallback) !void {
         const md = try self.getMD();
 
         const start = c.get_monotonic_time();
 
         _ = try md.*.recvCyclicFrames();
-        // Skip the cycle when measuring roundtrip time
-        if (self.period > 0) {
-            self.digital_counter();
+        if (callback) |cycle| {
+            cycle(self);
         }
         try md.*.sendCyclicFrames();
 
@@ -228,12 +229,13 @@ pub fn main() !void {
     var total_time: i64 = 0;
     var errors: u32 = 0;
     const iterations: u64 = 100_000 / (fieldbus.period / 100 + 3);
+    const cycle: ?FieldbusCallback = if (fieldbus.period > 0) digital_counter else null;
 
     info("Starting loop cycle with {d} us period\n", .{
         fieldbus.period
     });
     while (fieldbus.iteration < iterations) {
-        fieldbus.iterate() catch |err| {
+        fieldbus.iterate(cycle) catch |err| {
             errors += 1;
             info("\nIteration error: status {}\n", .{ err });
             continue;
