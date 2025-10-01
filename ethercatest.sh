@@ -22,10 +22,17 @@ test -z "$2" && period=1000 || period=$2
 set -o pipefail
 
 
-run_test() {
+single_run() {
     local niceness=$1
     local period=$2
-    if ! nice -n$niceness $binary -q $period 2>&1 | awk '/^Iteration time/ { print $5 ", " $7 ", " $9 ", " $11 }'; then
+    nice -n$niceness $binary -q $period 2>&1 | awk '/^Iteration time/ { print $5 ", " $7 ", " $9 ", " $11 }'
+}
+
+run_test() {
+    # Try three times before giving up
+    if single_run "$@" || single_run "$@" || single_run "$@"; then
+        :
+    else
         die "** ERROR DURING THE RUN: do you have root privileges? The interface is up?"
         exit 1
     fi
