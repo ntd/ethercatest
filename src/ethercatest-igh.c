@@ -404,21 +404,19 @@ fieldbus_stop(Fieldbus *fieldbus)
     }
 }
 
-static int
+static void
 fieldbus_dump(Fieldbus *fieldbus)
 {
     int wkc = fieldbus->domain_state.working_counter;
     int i;
 
-    info("Iteration %" PRIu64 ":  %" PRId64 " usec WKC %d",
+    info("Iteration %" PRIu64 ":  %" PRId64 " usec  WKC %d",
          fieldbus->iteration, fieldbus->iteration_time, wkc);
 
     for (i = 0; i < ecrt_domain_size(fieldbus->domain); ++i) {
         info(" %02X", fieldbus->map[i]);
     }
     info("   \r");
-
-    return TRUE;
 }
 
 static void
@@ -432,7 +430,7 @@ digital_counter(Fieldbus *fieldbus)
 static void
 usage(void)
 {
-    info("Usage: ethercatest-igh [PERIOD]\n"
+    info("Usage: ethercatest-igh [-q|--quiet] [PERIOD]\n"
          "  [PERIOD] Scantime in us (0 for roundtrip performances)\n");
 }
 
@@ -480,10 +478,13 @@ main(int argc, char *argv[])
         status = fieldbus_iterate(&fieldbus, cycle);
         if (status < 0) {
             ++errors;
-            info("Error %d\n", status);
-        } else if (! silent && ! fieldbus_dump(&fieldbus)) {
-            ++errors;
-        } else if (max_time == 0) {
+            info("\nIteration error: status %d\n", status);
+            continue;
+        }
+        if (! silent) {
+            fieldbus_dump(&fieldbus);
+        }
+        if (max_time == 0) {
             min_time = max_time = fieldbus.iteration_time;
         } else if (fieldbus.iteration_time < min_time) {
             min_time = fieldbus.iteration_time;
