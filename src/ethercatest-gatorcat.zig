@@ -168,6 +168,9 @@ const Fieldbus = struct {
 
         try md.*.busOp(10_000_000);
         info("Switched to OP\n", .{});
+
+        try md.*.sendCyclicFrames();
+        info("Send initial packet\n", .{});
     }
 
     fn digital_counter(self: *Fieldbus) void {
@@ -186,11 +189,14 @@ const Fieldbus = struct {
         const md = try self.getMD();
 
         const start = c.get_monotonic_time();
-        try md.*.sendRecvCyclicFrames();
+
+        _ = try md.*.recvCyclicFrames();
         // Skip the cycle when measuring roundtrip time
         if (self.period > 0) {
             self.digital_counter();
         }
+        try md.*.sendCyclicFrames();
+
         const stop = c.get_monotonic_time();
 
         self.iteration += 1;
@@ -227,7 +233,11 @@ pub fn main() !void {
         fieldbus.period
     });
     while (fieldbus.iteration < iterations) {
-        fieldbus.iterate() catch { errors += 1; };
+        fieldbus.iterate() catch |err| {
+            errors += 1;
+            info("\nIteration error: status {}\n", .{ err });
+            continue;
+        };
         if (! fieldbus.silent) {
             fieldbus.dump();
         }
